@@ -39,6 +39,8 @@ jobs:
       - name: Build and Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ELECTRON_BUILD: 'true'
         run: |
+          npm run gen-content
           npm run build
           npx electron-builder --publish always

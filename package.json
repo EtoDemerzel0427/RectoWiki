@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
-    "electron:build": "cross-env ELECTRON_BUILD=true vite build && electron-builder",
+    "electron:build": "npm run gen-content && cross-env ELECTRON_BUILD=true vite build && electron-builder",
     "gen-content": "node scripts/generate-content.js"
   },
   "build": {

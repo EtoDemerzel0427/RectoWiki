@@ -36,7 +36,7 @@ async function generate() {
             id,
             title: data.title || fileName,
             slug: data.slug,
-            filePath: file, // Relative path for loading content
+            filePath: `content/${file}`, // Relative path for loading content
             category: data.category || segments[0] || 'General',
             tags: data.tags || [],
             date,
