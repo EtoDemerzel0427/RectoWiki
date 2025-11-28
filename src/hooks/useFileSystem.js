@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { isElectron, readFile, writeFile, createFile, deleteFile, createDir, renamePath } from '../utils/fileSystem';
+import { parseFrontmatter, stringifyFrontmatter } from '../utils/frontmatter';
 
 export const useFileSystem = () => {
     const [notes, setNotes] = useState([]);
@@ -52,11 +53,16 @@ export const useFileSystem = () => {
             // User requested: Input name = filename. Page title = YAML title (initially same as filename or empty).
             // We'll set initial YAML title to filename for convenience, but it can be changed independently.
             const initialTitle = name.replace('.md', '');
+            const initialSlug = initialTitle.toLowerCase()
+                .replace(/[^\w\s-]/g, '') // Remove non-word chars (except space and hyphen)
+                .replace(/\s+/g, '-')     // Replace spaces with hyphens
+                .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
             const initialCategory = parentId ? parentId.split('/')[0] : 'General';
             const initialDate = new Date().toISOString().split('T')[0];
 
             const fileContent = `---
 title: ${initialTitle}
+slug: ${initialSlug}
 date: ${initialDate}
 tags: []
 category: ${initialCategory}
@@ -69,6 +75,8 @@ category: ${initialCategory}
             const newNote = {
                 id: parentId ? `${parentId}/${name.replace('.md', '')}` : name.replace('.md', ''),
                 title: initialTitle,
+                slug: initialSlug,
+                filePath: `${parentPath}/${fileName}`, // Add filePath
                 category: initialCategory, // Simple category logic
                 tags: [],
                 date: initialDate,
@@ -174,6 +182,27 @@ category: ${initialCategory}
             const oldPath = `${parentPath}/${oldFileName}`;
             const newPath = `${parentPath}/${newFileName}`;
 
+            // 0. Update YAML content (Title & Slug) before renaming
+            if (!item.isFolder) {
+                try {
+                    const content = await readFile(oldPath);
+                    const { metadata, body } = parseFrontmatter(content);
+
+                    const newSlug = newName.replace('.md', '').toLowerCase().replace(/\s+/g, '-');
+
+                    const newMetadata = {
+                        ...metadata,
+                        title: newName.replace('.md', ''),
+                        slug: newSlug
+                    };
+
+                    const newContent = stringifyFrontmatter(newMetadata, body);
+                    await writeFile(oldPath, newContent);
+                } catch (e) {
+                    console.error("Failed to update YAML during rename", e);
+                }
+            }
+
             // 1. Rename on disk
             await renamePath(oldPath, newPath);
 
@@ -200,6 +229,7 @@ category: ${initialCategory}
             // 3. Optimistic State Update
             // We need to update the notes array immediately so the UI doesn't try to access the old file
             const newId = item.parentId ? `${item.parentId}/${newName.replace('.md', '')}` : newName.replace('.md', '');
+            const newSlug = newName.replace('.md', '').toLowerCase().replace(/\s+/g, '-');
 
             setNotes(prev => prev.map(n => {
                 if (n.id === item.id) {
@@ -207,7 +237,9 @@ category: ${initialCategory}
                         ...n,
                         id: newId,
                         title: newName.replace('.md', ''),
-                        fileName: newFileName
+                        slug: newSlug,
+                        fileName: newFileName,
+                        filePath: `${parentPath}/${newFileName}`
                     };
                 }
                 // If it's a folder, we technically need to update all children's IDs and parentIds

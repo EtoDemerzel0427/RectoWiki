@@ -1,5 +1,6 @@
 ---
 title: 杨振宁人物志
+slug: chen-ning-yang
 date: 2025-11-28
 tags: [People]
 category: Physics

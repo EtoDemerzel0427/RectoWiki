@@ -103,7 +103,7 @@ const TreeNode = ({ node, level = 0, activeNoteId, onSelect, expandedNodes, togg
                     if (hasChildren || node.isFolder) {
                         toggleNode(node.id);
                     } else {
-                        onSelect(node.id);
+                        onSelect(node.slug || node.id);
                     }
                 }}
                 onContextMenu={handleContextMenu}
@@ -261,7 +261,7 @@ const Sidebar = ({
                             flatFilteredNotes.map(note => (
                                 <div
                                     key={note.id}
-                                    onClick={() => onNavigate(note.id)}
+                                    onClick={() => onNavigate(note.slug || note.id)}
                                     className="flex flex-col gap-1 px-3 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                                 >
                                     <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{note.title}</span>

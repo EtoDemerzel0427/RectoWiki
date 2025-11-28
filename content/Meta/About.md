@@ -1,5 +1,6 @@
 ---
 title: 关于这个 Wiki
+slug: about
 date: 2025-11-28
 tags: [Intro, About]
 category: Meta
@@ -18,3 +19,5 @@ category: Meta
 3. **现代体验**：比 TiddlyWiki 更美观，比 Notion 更自由。
 
 尝试点击这个链接跳转到 [[CSS Grid 备忘单]] 或者 [[量子力学笔记：薛定谔方程]]。
+
+test

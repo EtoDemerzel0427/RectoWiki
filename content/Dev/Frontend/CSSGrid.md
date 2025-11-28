@@ -1,10 +1,10 @@
 ---
 title: CSS Grid 备忘单
+slug: css-grid
 date: 2023-10-28
 tags: [CSS, CheatSheet]
 category: Dev
 ---
-
 # CSS Grid 常用属性
 
 这个页面用于测试布局宽度是否正常。

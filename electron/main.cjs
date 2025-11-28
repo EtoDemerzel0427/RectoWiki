@@ -57,7 +57,8 @@ const getPath = (relativePath) => {
 
 ipcMain.handle('read-file', async (event, filePath) => {
     try {
-        const content = await fsPromises.readFile(filePath, 'utf-8');
+        const absolutePath = getPath(filePath);
+        const content = await fsPromises.readFile(absolutePath, 'utf-8');
         return { success: true, content };
     } catch (error) {
         return { success: false, error: error.message };
@@ -66,16 +67,20 @@ ipcMain.handle('read-file', async (event, filePath) => {
 
 ipcMain.handle('write-file', async (event, filePath, content) => {
     try {
-        await fsPromises.writeFile(filePath, content, 'utf-8');
+        const absolutePath = getPath(filePath);
+        // console.log(`[Main] Writing file to: ${absolutePath}`);
+        await fsPromises.writeFile(absolutePath, content, 'utf-8');
         return { success: true };
     } catch (error) {
+        console.error(`[Main] Write failed: ${error.message}`);
         return { success: false, error: error.message };
     }
 });
 
 ipcMain.handle('create-file', async (event, filePath, content = '') => {
     try {
-        await fsPromises.writeFile(filePath, content, 'utf-8');
+        const absolutePath = getPath(filePath);
+        await fsPromises.writeFile(absolutePath, content, 'utf-8');
         return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
@@ -84,8 +89,9 @@ ipcMain.handle('create-file', async (event, filePath, content = '') => {
 
 ipcMain.handle('delete-file', async (event, filePath) => {
     try {
+        const absolutePath = getPath(filePath);
         // Use rm with recursive: true to handle both files and directories
-        await fsPromises.rm(filePath, { recursive: true, force: true });
+        await fsPromises.rm(absolutePath, { recursive: true, force: true });
         return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
@@ -94,7 +100,8 @@ ipcMain.handle('delete-file', async (event, filePath) => {
 
 ipcMain.handle('create-dir', async (event, dirPath) => {
     try {
-        await fsPromises.mkdir(dirPath, { recursive: true });
+        const absolutePath = getPath(dirPath);
+        await fsPromises.mkdir(absolutePath, { recursive: true });
         return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
@@ -103,7 +110,9 @@ ipcMain.handle('create-dir', async (event, dirPath) => {
 
 ipcMain.handle('rename-path', async (event, oldPath, newPath) => {
     try {
-        await fsPromises.rename(oldPath, newPath);
+        const absoluteOldPath = getPath(oldPath);
+        const absoluteNewPath = getPath(newPath);
+        await fsPromises.rename(absoluteOldPath, absoluteNewPath);
         return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
@@ -126,7 +135,7 @@ ipcMain.handle('run-generator', async () => {
                 resolve({ success: false, error: error.message });
                 return;
             }
-            console.log(`stdout: ${stdout}`);
+            // console.log(`stdout: ${stdout}`);
             if (stderr) console.error(`stderr: ${stderr}`);
             resolve({ success: true });
         });

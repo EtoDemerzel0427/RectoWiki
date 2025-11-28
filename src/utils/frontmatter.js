@@ -54,6 +54,7 @@ export const stringifyFrontmatter = (metadata, body) => {
     const yamlLines = [
         '---',
         `title: ${metadata.title || ''}`,
+        `slug: ${metadata.slug || ''}`,
         `date: ${metadata.date || new Date().toISOString().split('T')[0]}`,
         `tags: [${tagsArray.join(', ')}]`,
         `category: ${metadata.category || ''}`,

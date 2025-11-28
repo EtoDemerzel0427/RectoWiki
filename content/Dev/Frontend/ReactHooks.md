@@ -1,10 +1,10 @@
 ---
 title: React Hooks 闭包陷阱
+slug: react-hooks
 date: 2023-11-02
 tags: [React, JavaScript, Bug]
 category: Dev
 ---
-
 # React Hooks 中的闭包陷阱
 
 在使用 `useEffect` 或 `useCallback` 时，经常会遇到拿到的 state 是旧值的情况。

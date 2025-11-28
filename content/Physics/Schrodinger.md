@@ -1,10 +1,10 @@
 ---
 title: 量子力学笔记：薛定谔方程
+slug: 
 date: 2023-11-15
 tags: [Math, Quantum]
 category: Physics
 ---
-
 # 薛定谔方程
 
 这是量子力学的核心方程。对于非相对论粒子：

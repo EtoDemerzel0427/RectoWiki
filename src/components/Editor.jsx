@@ -52,9 +52,15 @@ const Editor = ({ content, filePath, onSave, onChange }) => {
     };
 
     const handleSave = async () => {
-        const fullContent = stringifyFrontmatter(metadata, body);
-        if (onSave) {
-            await onSave(fullContent);
+        try {
+            const fullContent = stringifyFrontmatter(metadata, body);
+
+            if (onSave) {
+                await onSave(fullContent);
+            }
+        } catch (e) {
+            console.error("Error in handleSave:", e);
+            alert("Error saving: " + e.message);
         }
     };
 
@@ -83,6 +89,17 @@ const Editor = ({ content, filePath, onSave, onChange }) => {
                 />
 
                 <div className="grid grid-cols-[100px_1fr] gap-y-2 text-sm">
+                    <div className="text-slate-500 dark:text-slate-400 flex items-center">Slug</div>
+                    <input
+                        type="text"
+                        name="note-slug"
+                        value={metadata.slug || ''}
+                        onChange={(e) => updateMetadata('slug', e.target.value)}
+                        placeholder="my-custom-url"
+                        className="bg-transparent border-none focus:outline-none text-slate-700 dark:text-slate-300 w-full font-mono text-xs"
+                        autoComplete="off"
+                    />
+
                     <div className="text-slate-500 dark:text-slate-400 flex items-center">Date</div>
                     <input
                         type="date"

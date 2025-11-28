@@ -209,10 +209,17 @@ export default function App() {
   };
 
   // Helper to update URL
-  const updateUrl = (noteId) => {
+  const updateUrl = (identifier) => {
     const basePath = getBasePath();
-    const newPath = noteId ? `${basePath}${noteId}` : basePath;
-    window.history.pushState({}, '', newPath);
+    // Find note to check for slug
+    const note = notes.find(n => n.id === identifier || n.slug === identifier);
+    const pathSegment = note?.slug || identifier;
+
+    const newPath = pathSegment ? `${basePath}${pathSegment}` : basePath;
+
+    if (window.location.pathname !== newPath) {
+      window.history.pushState({}, '', newPath);
+    }
   };
 
 
@@ -246,7 +253,7 @@ export default function App() {
 
     let targetNote = null;
     if (noteIdFromUrl) {
-      targetNote = notes.find(n => n.id === noteIdFromUrl);
+      targetNote = notes.find(n => n.id === noteIdFromUrl || n.slug === noteIdFromUrl);
     }
 
     if (!targetNote) {
@@ -269,28 +276,40 @@ export default function App() {
         }
         setExpandedNodes(prev => [...new Set([...prev, ...parents])]);
       }
+    } else if (decodedPath) {
+      // If a path was in the URL but no matching note found,
+      // set activeNoteId to the decodedPath. This might be a new file
+      // not yet in `notes` or a non-existent path.
+      setActiveNoteId(decodedPath);
     }
 
     // Expand root folders
     const rootFolders = notes.filter(n => !n.parentId && n.isFolder).map(n => n.id);
     setExpandedNodes(prev => [...new Set([...prev, ...rootFolders])]);
-  }, [loading, notes]);
+  }, [loading, notes, location.pathname]); // Depend on location.pathname to react to URL changes
 
-  // Fetch fresh content from disk when activeNoteId changes (Electron only)
+  // Load content when activeNoteId changes
   useEffect(() => {
     const loadContent = async () => {
-      if (activeNoteId && isElectron()) {
+      if (!activeNoteId) {
+        setFileContent(''); // Clear content if no active note
+        return;
+      }
+
+      if (isElectron()) {
         try {
-          // Construct file path. Assuming content is in 'content' folder relative to root.
-          // We need to know the full path.
-          // The 'id' is like 'Physics/Schrodinger'. The file is 'content/Physics/Schrodinger.md'.
-          // We need to ask Electron for the root path or assume a structure.
-          // Let's assume we can get the root path or just use relative path if the main process handles it.
-          // Our main process 'read-file' handler expects a path.
-          // Let's use a relative path to the project root for now, or better, ask main process to resolve.
-          // Actually, let's try sending a relative path "content/ID.md" and see if main process resolves it correctly.
-          // In main.js I put: path.join(__dirname, '..', relativePath) which should work.
-          const relativePath = `content/${activeNoteId}.md`;
+          const note = notes.find(n => n.id === activeNoteId);
+          let relativePath;
+
+          if (note && note.filePath) {
+            // generate-content.js: filePath = file (e.g. "Physics/Quantum.md") relative to CONTENT_DIR
+            // So we need to prepend 'content/'
+            relativePath = `content/${note.filePath}`;
+          } else {
+            // Fallback if filePath is not available (e.g., new file not yet processed by generator)
+            relativePath = `content/${activeNoteId}.md`;
+          }
+
           const content = await readFile(relativePath);
           setFileContent(content);
         } catch (error) {
@@ -311,11 +330,20 @@ export default function App() {
 
   const handleSaveContent = async (newContent) => {
     if (!activeNoteId) return;
+    const note = notes.find(n => n.id === activeNoteId);
+
     try {
       // 1. Write to file (Electron only)
       if (isElectron()) {
-        const relativePath = `content/${activeNoteId}.md`;
+        let relativePath;
+        if (note && note.filePath) {
+          relativePath = `content/${note.filePath}`;
+        } else {
+          relativePath = `content/${activeNoteId}.md`;
+        }
         await writeFile(relativePath, newContent);
+      } else {
+        // Browser mode save (no-op or local storage if implemented)
       }
 
       setFileContent(newContent);
@@ -329,6 +357,7 @@ export default function App() {
             ...n,
             content: newContent,
             title: metadata.title || n.title,
+            slug: metadata.slug || n.slug, // Update slug
             tags: metadata.tags || n.tags,
             category: metadata.category || n.category,
             date: metadata.date || n.date
@@ -336,6 +365,11 @@ export default function App() {
         }
         return n;
       }));
+
+      // Update URL if slug changed
+      if (metadata.slug && metadata.slug !== note?.slug) {
+        updateUrl(metadata.slug);
+      }
 
       // 3. Regenerate and Reload (Electron only)
       if (isElectron() && window.electronAPI?.runGenerator) {
@@ -364,7 +398,7 @@ export default function App() {
       }
 
       if (noteId && notes.length > 0) {
-        const target = notes.find(n => n.id === noteId);
+        const target = notes.find(n => n.id === noteId || n.slug === noteId);
         if (target) setActiveNoteId(target.id);
       }
     };
@@ -392,7 +426,8 @@ export default function App() {
       const decodedTitle = decodeURIComponent(identifier);
       target = notes.find(n => n.title.toLowerCase() === decodedTitle.toLowerCase());
     } else {
-      target = notes.find(n => n.id === identifier);
+      // Try to find by ID or Slug
+      target = notes.find(n => n.id === identifier || n.slug === identifier);
     }
 
     if (target) {
@@ -489,7 +524,8 @@ export default function App() {
   const processContent = (content) => {
     if (!content) return '';
     // Replace [[Title]] with [Title](wiki:Title) - encode the title for the URL
-    return content.replace(/\[\[(.*?)\]\]/g, (match, title) => `[${title}](wiki:${encodeURIComponent(title)})`);
+    return content.replace(/\[\[(.*?)\]\]/g, (match, title) => `[${title}](wiki:${encodeURIComponent(title)
+      })`);
   };
 
   const customComponents = {
@@ -566,17 +602,13 @@ export default function App() {
                     ? `content/${activeNote.parentId}/${activeNote.fileName}`
                     : `content/${activeNote.fileName}`
                 }
-                onSave={(newContent) => {
+                onSave={handleSaveContent}
+                onChange={(newContent) => {
                   setFileContent(newContent);
                   // Update view state immediately
                   const { metadata, body } = parseFrontmatter(newContent);
-                  console.log('Parsed Metadata:', metadata); // Debug log
-                  console.log('Parsed Body Preview:', body.substring(0, 100)); // Debug log
                   setViewMetadata(metadata);
                   setViewBody(body);
-                }}
-                onChange={(newContent) => {
-                  setFileContent(newContent);
                 }}
               />
             ) : (
@@ -644,7 +676,7 @@ export default function App() {
                 </div>
               </div>
             )}
-          </div>
+          </div >
         ) : (
           <div className="flex-1 flex items-center justify-center text-slate-400">
             Select a page to view or edit
@@ -652,19 +684,21 @@ export default function App() {
         )}
 
         {/* Edit Toggle Button - Electron Only */}
-        {activeNote && isElectron() && (
-          <button
-            onClick={() => setIsEditMode(!isEditMode)}
-            className="absolute top-6 right-8 p-2 bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors z-10"
-            title={isEditMode ? "View Mode" : "Edit Mode"}
-          >
-            {isEditMode ? <Eye size={20} /> : <Edit size={20} />}
-          </button>
-        )}
-      </div>
+        {
+          activeNote && isElectron() && (
+            <button
+              onClick={() => setIsEditMode(!isEditMode)}
+              className="absolute top-6 right-8 p-2 bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors z-10"
+              title={isEditMode ? "View Mode" : "Edit Mode"}
+            >
+              {isEditMode ? <Eye size={20} /> : <Edit size={20} />}
+            </button>
+          )
+        }
+      </div >
 
       {/* Modal */}
-      <Modal
+      < Modal
         isOpen={modalConfig.isOpen}
         onClose={closeModal}
         title={modalConfig.title}
@@ -672,29 +706,31 @@ export default function App() {
         confirmText={modalConfig.type === 'delete' ? 'Delete' : 'Confirm'}
         isDestructive={modalConfig.type === 'delete'}
       >
-        {modalConfig.type === 'delete' ? (
-          <p className="text-slate-600 dark:text-slate-300">
-            Are you sure you want to delete <span className="font-semibold">{modalConfig.item?.title}</span>? This action cannot be undone.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Name
-            </label>
-            <input
-              type="text"
-              value={modalConfig.value}
-              onChange={(e) => setModalConfig(prev => ({ ...prev, value: e.target.value }))}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              placeholder="Enter name..."
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleModalConfirm();
-              }}
-            />
-          </div>
-        )}
-      </Modal>
+        {
+          modalConfig.type === 'delete' ? (
+            <p className="text-slate-600 dark:text-slate-300">
+              Are you sure you want to delete <span className="font-semibold">{modalConfig.item?.title}</span>? This action cannot be undone.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Name
+              </label>
+              <input
+                type="text"
+                value={modalConfig.value}
+                onChange={(e) => setModalConfig(prev => ({ ...prev, value: e.target.value }))}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Enter name..."
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleModalConfirm();
+                }}
+              />
+            </div>
+          )
+        }
+      </Modal >
     </div >
   );
 }
