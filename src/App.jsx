@@ -339,9 +339,8 @@ export default function App() {
           let relativePath;
 
           if (note && note.filePath) {
-            // generate-content.js: filePath = file (e.g. "Physics/Quantum.md") relative to CONTENT_DIR
-            // So we need to prepend 'content/'
-            relativePath = `content/${note.filePath}`;
+            // generate-content.js: filePath = content/file (e.g. "content/Physics/Quantum.md")
+            relativePath = note.filePath;
           } else {
             // Fallback if filePath is not available (e.g., new file not yet processed by generator)
             relativePath = `content/${activeNoteId}.md`;
@@ -378,7 +377,7 @@ export default function App() {
       if (isElectron()) {
         let relativePath;
         if (note && note.filePath) {
-          relativePath = `content/${note.filePath}`;
+          relativePath = note.filePath;
         } else {
           relativePath = `content/${activeNoteId}.md`;
         }
