@@ -77,6 +77,31 @@ meta-wiki/
       ```
     - You may need to restart the dev server or refresh the page to see changes.
 
+## Desktop App (Electron)
+
+This project also includes a desktop application wrapper built with Electron, providing a native experience with local file system access.
+
+![Screenshot](public/screenshot.png)
+
+### Features
+
+- **Local File System**: Directly edit files on your hard drive.
+- **Native Menus**: Context menus for file operations (rename, delete, etc.).
+- **Offline Capable**: Works without an internet connection.
+
+### Running the Desktop App
+
+1.  Start the development version:
+    ```bash
+    npm run electron:dev
+    ```
+
+2.  Build for production (Mac/Windows/Linux):
+    ```bash
+    npm run electron:build
+    ```
+    The executable will be in the `dist/` folder.
+
 ## Deployment
 
 ### GitHub Pages

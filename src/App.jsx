@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneDark, oneLight, tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import 'katex/dist/katex.min.css'; // Import KaTeX CSS
 
 import {
@@ -22,8 +22,17 @@ import {
   Tag,
   FileText,
   X,
-  Home
+  Home,
+  Edit,
+  Save,
+  Eye
 } from 'lucide-react';
+import Editor from './components/Editor';
+import Sidebar from './components/Sidebar';
+import Modal from './components/Modal';
+import { isElectron, readFile, writeFile } from './utils/fileSystem';
+import { parseFrontmatter } from './utils/frontmatter';
+import { useFileSystem } from './hooks/useFileSystem';
 
 // --- 工具函数：构建树形结构 ---
 const buildTree = (items) => {
@@ -77,72 +86,120 @@ const buildTree = (items) => {
   return rootItems;
 };
 
-// --- 组件：递归树形节点 ---
-const TreeNode = ({ node, level = 0, activeNoteId, onSelect, expandedNodes, toggleNode }) => {
-  const hasChildren = node.children && node.children.length > 0;
-  const isExpanded = expandedNodes.includes(node.id);
-  const isActive = activeNoteId === node.id;
 
-  return (
-    <div className="select-none">
-      <div
-        className={`flex items-center gap-2 px-3 py-1.5 my-0.5 rounded-md cursor-pointer text-sm transition-colors ${isActive && !node.isFolder
-          ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium'
-          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        style={{ paddingLeft: `${level * 12 + 12}px` }}
-        onClick={() => {
-          if (hasChildren || node.isFolder) {
-            toggleNode(node.id);
-          } else {
-            onSelect(node.id);
-          }
-        }}
-      >
-        <span className="opacity-70 flex-shrink-0">
-          {hasChildren || node.isFolder ? (
-            isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
-          ) : <span className="w-3.5 inline-block" />}
-        </span>
-
-        <span className="opacity-70 flex-shrink-0">
-          {node.isFolder
-            ? (isExpanded ? <FolderOpen size={16} className="text-indigo-500" /> : <Folder size={16} className="text-slate-400" />)
-            : <FileText size={16} />}
-        </span>
-
-        <span className="truncate">{node.title}</span>
-      </div>
-
-      {isExpanded && hasChildren && (
-        <div>
-          {node.children.map(child => (
-            <TreeNode
-              key={child.id}
-              node={child}
-              level={level + 1}
-              activeNoteId={activeNoteId}
-              onSelect={onSelect}
-              expandedNodes={expandedNodes}
-              toggleNode={toggleNode}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
 
 // --- 主程序 ---
 export default function App() {
-  const [notes, setNotes] = useState([]);
+  const {
+    notes,
+    loading,
+    setNotes,
+    loadNotes,
+    handleCreateFile,
+    handleCreateDir,
+    handleDelete,
+    handleRename: fsHandleRename,
+    handleReorder
+  } = useFileSystem();
+
   const [activeNoteId, setActiveNoteId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState(null);
   const [expandedNodes, setExpandedNodes] = useState([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // const [loading, setLoading] = useState(true); // Handled by hook
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [fileContent, setFileContent] = useState(''); // Store fresh content from disk
+
+  // Modal State
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: null, // 'createFile', 'createDir', 'rename', 'delete'
+    title: '',
+    value: '',
+    item: null, // For rename/delete/create context
+    parentId: null // Explicit parentId for creation
+  });
+
+  // State for View Mode Metadata
+  const [viewMetadata, setViewMetadata] = useState({});
+  const [viewBody, setViewBody] = useState('');
+
+  useEffect(() => {
+    const { metadata, body } = parseFrontmatter(fileContent);
+    setViewMetadata(metadata);
+    setViewBody(body);
+  }, [fileContent]);
+
+  const openModal = (type, item = null) => {
+    let title = '';
+    let value = '';
+    let parentId = null;
+
+    // Determine parentId based on context
+    if (type === 'createFile' || type === 'createDir') {
+      if (item) {
+        // Context menu on an item
+        parentId = item.isFolder ? item.id : item.parentId;
+      }
+      // If no item provided (e.g. from Sidebar header buttons), default to root (parentId = null)
+      // We explicitly removed the fallback to activeNoteId here as per user request.
+    }
+
+    switch (type) {
+      case 'createFile':
+        title = parentId ? `Create New Page in ${parentId}` : 'Create New Page';
+        break;
+      case 'createDir':
+        title = parentId ? `Create New Folder in ${parentId}` : 'Create New Folder';
+        break;
+      case 'rename':
+        title = 'Rename Item';
+        value = item.title;
+        break;
+      case 'delete':
+        title = 'Delete Item';
+        break;
+    }
+
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      value,
+      item,
+      parentId
+    });
+  };
+
+  const closeModal = () => {
+    setModalConfig(prev => ({ ...prev, isOpen: false }));
+  };
+
+  const handleModalConfirm = async () => {
+    const { type, value, item, parentId } = modalConfig;
+
+    try {
+      if (type === 'createFile') {
+        await handleCreateFile(value, parentId);
+      } else if (type === 'createDir') {
+        await handleCreateDir(value, parentId);
+      } else if (type === 'rename') {
+        const newId = await fsHandleRename(item, value);
+        if (newId && activeNoteId === item.id) {
+          setActiveNoteId(newId);
+        }
+      } else if (type === 'delete') {
+        await handleDelete(item);
+      }
+      closeModal();
+    } catch (error) {
+      console.error("Operation failed:", error);
+      // Could show error in modal or toast
+      alert("Operation failed: " + error.message);
+    }
+  };
 
   // Helper to get base path
   const getBasePath = () => {
@@ -158,83 +215,141 @@ export default function App() {
     window.history.pushState({}, '', newPath);
   };
 
-  // Fetch content on mount
+
   useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}content.json`)
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to load content');
-        return res.json();
-      })
-      .then(data => {
-        setNotes(data);
-        setLoading(false);
+    if (loading || notes.length === 0) return;
 
-        // Check URL for note ID (Path based)
-        const basePath = getBasePath();
-        const path = window.location.pathname;
-        let noteIdFromUrl = null;
+    // Check URL for note ID (Path based)
+    const basePath = getBasePath();
+    const path = window.location.pathname;
+    let noteIdFromUrl = null;
 
-        if (path.startsWith(basePath)) {
-          const relativePath = path.substring(basePath.length);
-          if (relativePath && relativePath !== '') {
-            noteIdFromUrl = decodeURIComponent(relativePath);
-          }
-        } else if (path.startsWith('/')) {
-          // Handle case where base might be missing or different in dev
-          // e.g. /Dev/Frontend/CSSGrid
-          const potentialId = path.substring(1);
-          if (data.some(n => n.id === potentialId)) {
-            noteIdFromUrl = decodeURIComponent(potentialId);
-          }
+    if (path.startsWith(basePath)) {
+      const relativePath = path.substring(basePath.length);
+      if (relativePath && relativePath !== '') {
+        noteIdFromUrl = decodeURIComponent(relativePath);
+      }
+    } else if (path.startsWith('/')) {
+      const potentialId = path.substring(1);
+      if (notes.some(n => n.id === potentialId)) {
+        noteIdFromUrl = decodeURIComponent(potentialId);
+      }
+    }
+
+    // Handle redirect from 404.html (query param 'p')
+    const params = new URLSearchParams(window.location.search);
+    const redirectPath = params.get('p');
+    if (redirectPath) {
+      noteIdFromUrl = decodeURIComponent(redirectPath);
+      updateUrl(noteIdFromUrl);
+    }
+
+    let targetNote = null;
+    if (noteIdFromUrl) {
+      targetNote = notes.find(n => n.id === noteIdFromUrl);
+    }
+
+    if (!targetNote) {
+      targetNote = notes.find(n => n.id === 'Meta/About') || notes.find(n => !n.isFolder);
+    }
+
+    if (targetNote) {
+      setActiveNoteId(targetNote.id);
+      if (targetNote.id !== noteIdFromUrl) {
+        updateUrl(targetNote.id);
+      }
+
+      // Expand parents
+      if (targetNote.parentId) {
+        const parents = [];
+        let current = targetNote;
+        while (current.parentId) {
+          parents.push(current.parentId);
+          current = notes.find(n => n.id === current.parentId) || {};
         }
+        setExpandedNodes(prev => [...new Set([...prev, ...parents])]);
+      }
+    }
 
-        // Handle redirect from 404.html (query param 'p')
-        const params = new URLSearchParams(window.location.search);
-        const redirectPath = params.get('p');
-        if (redirectPath) {
-          noteIdFromUrl = decodeURIComponent(redirectPath);
-          // Clean up URL
-          updateUrl(noteIdFromUrl);
+    // Expand root folders
+    const rootFolders = notes.filter(n => !n.parentId && n.isFolder).map(n => n.id);
+    setExpandedNodes(prev => [...new Set([...prev, ...rootFolders])]);
+  }, [loading, notes]);
+
+  // Fetch fresh content from disk when activeNoteId changes (Electron only)
+  useEffect(() => {
+    const loadContent = async () => {
+      if (activeNoteId && isElectron()) {
+        try {
+          // Construct file path. Assuming content is in 'content' folder relative to root.
+          // We need to know the full path.
+          // The 'id' is like 'Physics/Schrodinger'. The file is 'content/Physics/Schrodinger.md'.
+          // We need to ask Electron for the root path or assume a structure.
+          // Let's assume we can get the root path or just use relative path if the main process handles it.
+          // Our main process 'read-file' handler expects a path.
+          // Let's use a relative path to the project root for now, or better, ask main process to resolve.
+          // Actually, let's try sending a relative path "content/ID.md" and see if main process resolves it correctly.
+          // In main.js I put: path.join(__dirname, '..', relativePath) which should work.
+          const relativePath = `content/${activeNoteId}.md`;
+          const content = await readFile(relativePath);
+          setFileContent(content);
+        } catch (error) {
+          console.error("Failed to load file content:", error);
+          // Fallback to what's in notes array if read fails?
+          const note = notes.find(n => n.id === activeNoteId);
+          if (note) setFileContent(note.content);
         }
+      } else if (activeNoteId) {
+        // Browser mode: use the content from content.json
+        const note = notes.find(n => n.id === activeNoteId);
+        if (note) setFileContent(note.content);
+      }
+    };
+    loadContent();
+    setIsEditMode(false); // Reset edit mode on navigation
+  }, [activeNoteId, notes]);
 
-        let targetNote = null;
-        if (noteIdFromUrl) {
-          targetNote = data.find(n => n.id === noteIdFromUrl);
+  const handleSaveContent = async (newContent) => {
+    if (!activeNoteId) return;
+    try {
+      // 1. Write to file (Electron only)
+      if (isElectron()) {
+        const relativePath = `content/${activeNoteId}.md`;
+        await writeFile(relativePath, newContent);
+      }
+
+      setFileContent(newContent);
+
+      // 2. Parse metadata to update title/tags in the sidebar immediately (Optimistic)
+      const { metadata } = parseFrontmatter(newContent);
+
+      setNotes(prev => prev.map(n => {
+        if (n.id === activeNoteId) {
+          return {
+            ...n,
+            content: newContent,
+            title: metadata.title || n.title,
+            tags: metadata.tags || n.tags,
+            category: metadata.category || n.category,
+            date: metadata.date || n.date
+          };
         }
+        return n;
+      }));
 
-        if (!targetNote) {
-          // Fallback to default
-          targetNote = data.find(n => n.id === 'Meta/About') || data.find(n => !n.isFolder);
-        }
+      // 3. Regenerate and Reload (Electron only)
+      if (isElectron() && window.electronAPI?.runGenerator) {
+        await window.electronAPI.runGenerator();
+        // Reload notes to ensure full consistency (e.g. if category changed and folder structure needs update)
+        await loadNotes();
+      }
 
-        if (targetNote) {
-          setActiveNoteId(targetNote.id);
-          // Ensure URL is synced if we fell back
-          if (targetNote.id !== noteIdFromUrl) {
-            updateUrl(targetNote.id);
-          }
-
-          // Expand parents
-          if (targetNote.parentId) {
-            const parents = [];
-            let current = targetNote;
-            while (current.parentId) {
-              parents.push(current.parentId);
-              current = data.find(n => n.id === current.parentId) || {};
-            }
-            setExpandedNodes(prev => [...new Set([...prev, ...parents])]);
-          }
-        }
-
-        // Expand root folders
-        const rootFolders = data.filter(n => !n.parentId && n.isFolder).map(n => n.id);
-        setExpandedNodes(prev => [...new Set([...prev, ...rootFolders])]);
-      })
-      .catch(err => {
-        console.error("Failed to load content:", err);
-        setLoading(false);
-      });
-  }, []);
+      // Optional: Show success notification
+    } catch (error) {
+      console.error("Failed to save file:", error);
+      alert("Failed to save file: " + error.message);
+    }
+  };
 
   // Handle browser back/forward
   useEffect(() => {
@@ -418,162 +533,168 @@ export default function App() {
       </div>
 
       {/* Sidebar */}
-      <div className={`${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-10 w-64 h-full bg-slate-50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-transform duration-300 flex flex-col flex-shrink-0`}>
-        <div className="p-5 hidden md:flex items-center justify-between border-b border-transparent">
-          <h1 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <img src={`${import.meta.env.BASE_URL}logo.png`} alt="Logo" className="w-8 h-8" />
-            Weiran's Wiki
-          </h1>
-          <button onClick={() => setDarkMode(!darkMode)} className="p-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 transition-colors">
-            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-        </div>
-
-        {/* Search & Tag Indicator */}
-        <div className="px-3 mb-2 space-y-2">
-          <div className="relative group">
-            <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
-            <input
-              type="text"
-              placeholder="Quick find..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-slate-800 dark:text-slate-200"
-            />
-          </div>
-          {selectedTag && (
-            <div className="flex items-center justify-between bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 px-3 py-1.5 rounded-md text-xs font-medium border border-indigo-100 dark:border-indigo-800/50">
-              <span className="flex items-center gap-1"><Tag size={10} /> {selectedTag}</span>
-              <button onClick={() => setSelectedTag(null)} className="hover:text-indigo-900 dark:hover:text-indigo-100"><X size={12} /></button>
-            </div>
-          )}
-        </div>
-
-        {/* Navigation Content */}
-        <nav className="flex-1 overflow-y-auto px-2 pb-4 custom-scrollbar">
-          {(searchQuery || selectedTag) ? (
-            <div className="mt-2">
-              <div className="px-3 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                Search Results
-              </div>
-              {flatFilteredNotes && flatFilteredNotes.length > 0 ? (
-                flatFilteredNotes.map(note => (
-                  <div
-                    key={note.id}
-                    onClick={() => handleNavigate(note.id)}
-                    className="flex flex-col gap-1 px-3 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                  >
-                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{note.title}</span>
-                    <span className="text-xs text-slate-400 truncate">{note.content.substring(0, 40)}...</span>
-                  </div>
-                ))
-              ) : (
-                <div className="px-3 text-sm text-slate-400 italic">No notes found.</div>
-              )}
-            </div>
-          ) : (
-            <div className="mt-2">
-              <div className="px-3 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">Explorer</div>
-              {treeData.map(node => (
-                <TreeNode
-                  key={node.id}
-                  node={node}
-                  activeNoteId={activeNoteId}
-                  onSelect={(id) => handleNavigate(id)}
-                  expandedNodes={expandedNodes}
-                  toggleNode={toggleNode}
-                />
-              ))}
-            </div>
-          )}
-        </nav>
-      </div>
+      <Sidebar
+        treeData={treeData}
+        activeNoteId={activeNoteId}
+        onNavigate={(id) => handleNavigate(id)}
+        expandedNodes={expandedNodes}
+        toggleNode={toggleNode}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        selectedTag={selectedTag}
+        setSelectedTag={setSelectedTag}
+        isMobileMenuOpen={isMobileMenuOpen}
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        flatFilteredNotes={flatFilteredNotes}
+        onCreateFile={(item) => openModal('createFile', item)}
+        onCreateDir={(item) => openModal('createDir', item)}
+        onDelete={(item) => openModal('delete', item)}
+        onRename={(item) => openModal('rename', item)}
+        onReorder={handleReorder}
+      />
 
       {/* Main Content Area */}
       <div className="flex-1 h-full bg-white dark:bg-slate-950 flex flex-col relative overflow-hidden">
         {activeNote ? (
           <div className="flex-1 overflow-y-auto custom-scrollbar">
-            <div className="max-w-4xl mx-auto px-6 md:px-12 py-10 md:py-16 min-h-full flex flex-col">
+            {isEditMode ? (
+              <Editor
+                content={fileContent}
+                filePath={
+                  activeNote.parentId
+                    ? `content/${activeNote.parentId}/${activeNote.fileName}`
+                    : `content/${activeNote.fileName}`
+                }
+                onSave={(newContent) => {
+                  setFileContent(newContent);
+                  // Update view state immediately
+                  const { metadata, body } = parseFrontmatter(newContent);
+                  console.log('Parsed Metadata:', metadata); // Debug log
+                  console.log('Parsed Body Preview:', body.substring(0, 100)); // Debug log
+                  setViewMetadata(metadata);
+                  setViewBody(body);
+                }}
+                onChange={(newContent) => {
+                  setFileContent(newContent);
+                }}
+              />
+            ) : (
+              /* View Mode */
+              <div className="max-w-4xl mx-auto px-6 md:px-12 py-10 md:py-16 min-h-full flex flex-col">
+                <div className="flex-1">
+                  {/* Note Header */}
+                  <div className="mb-10">
+                    <div className="flex items-center gap-2 text-sm text-slate-400 mb-4">
+                      <Home size={14} />
+                      <span>/</span>
+                      <span>{viewMetadata.category || activeNote.category || 'General'}</span>
+                      <span>/</span>
+                      <span className="text-slate-600 dark:text-slate-300">{viewMetadata.title || activeNote.title}</span>
+                    </div>
 
-              <div className="flex-1">
-                {/* Note Header */}
-                <div className="mb-10">
-                  <div className="flex items-center gap-2 text-sm text-slate-400 mb-4">
-                    <Home size={14} />
-                    <span>/</span>
-                    <span>{activeNote.category}</span>
-                    <span>/</span>
-                    <span className="text-slate-600 dark:text-slate-300">{activeNote.title}</span>
-                  </div>
+                    <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-6 leading-tight tracking-tight">
+                      {viewMetadata.title || activeNote.title}
+                    </h1>
 
-                  <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-6 leading-tight tracking-tight">
-                    {activeNote.title}
-                  </h1>
+                    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-6">
+                      <div className="flex items-center gap-4 text-sm text-slate-500">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar size={14} />
+                          {/* Try to get date from viewMetadata if available, else fallback */}
+                          {viewMetadata.date || activeNote.date || 'No Date'}
+                        </div>
+                      </div>
 
-                  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-6">
-                    <div className="flex items-center gap-4 text-sm text-slate-500">
-                      <div className="flex items-center gap-1.5">
-                        <Calendar size={14} />
-                        {activeNote.date}
+                      <div className="flex gap-2">
+                        {(viewMetadata.tags
+                          ? (typeof viewMetadata.tags === 'string' ? viewMetadata.tags.split(',').map(t => t.trim()).filter(Boolean) : viewMetadata.tags)
+                          : activeNote.tags)?.map(tag => (
+                            <button
+                              key={tag}
+                              onClick={() => setSelectedTag(tag === selectedTag ? null : tag)}
+                              className={`px-2.5 py-1 text-xs rounded-full transition-colors flex items-center gap-1 ${selectedTag === tag
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                                }`}
+                            >
+                              <Tag size={10} />
+                              {tag}
+                            </button>
+                          ))}
                       </div>
                     </div>
+                  </div>
 
-                    <div className="flex gap-2">
-                      {activeNote.tags?.map(tag => (
-                        <button
-                          key={tag}
-                          onClick={() => setSelectedTag(tag === selectedTag ? null : tag)}
-                          className={`px-2.5 py-1 text-xs rounded-full transition-colors flex items-center gap-1 ${selectedTag === tag
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-                            }`}
-                        >
-                          <Tag size={10} />
-                          {tag}
-                        </button>
-                      ))}
-                    </div>
+                  {/* Note Body */}
+                  <div className="prose prose-slate dark:prose-invert max-w-none">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkMath]}
+                      rehypePlugins={[rehypeKatex]}
+                      components={customComponents}
+                      urlTransform={(url) => {
+                        if (url.startsWith('wiki:')) return url;
+                        return url;
+                      }}
+                    >
+                      {/* Strip frontmatter for display */}
+                      {processContent(fileContent.replace(/^---\s*[\r\n]+[\s\S]*?[\r\n]+---\s*[\r\n]*/, ''))}
+                    </ReactMarkdown>
                   </div>
                 </div>
-
-                {/* Note Body */}
-                <div className="min-h-[200px]">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkMath]}
-                    rehypePlugins={[rehypeKatex]}
-                    components={customComponents}
-                    urlTransform={(url) => {
-                      if (url.startsWith('wiki:')) return url;
-                      return url;
-                    }}
-                  >
-                    {processContent(activeNote.content)}
-                  </ReactMarkdown>
-                </div>
               </div>
-
-              <div className="mt-24 pt-8 border-t border-slate-100 dark:border-slate-800">
-                <a
-                  href={`https://github.com/EtoDemerzel0427/wiki/blob/main/content/${activeNote.id}.md`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-slate-400 text-sm flex items-center justify-center gap-2 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                >
-                  <Github size={14} />
-                  <span className="hover:underline">Edit this page on GitHub</span>
-                </a>
-              </div>
-            </div>
+            )}
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-300 dark:text-slate-700 bg-slate-50/30 dark:bg-slate-900/30">
-            <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-              <BookOpen size={32} className="text-slate-400" />
-            </div>
-            <p className="text-lg font-medium opacity-60">Select a file to view</p>
+          <div className="flex-1 flex items-center justify-center text-slate-400">
+            Select a page to view or edit
           </div>
         )}
+
+        {/* Edit Toggle Button - Electron Only */}
+        {activeNote && isElectron() && (
+          <button
+            onClick={() => setIsEditMode(!isEditMode)}
+            className="absolute top-6 right-8 p-2 bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors z-10"
+            title={isEditMode ? "View Mode" : "Edit Mode"}
+          >
+            {isEditMode ? <Eye size={20} /> : <Edit size={20} />}
+          </button>
+        )}
       </div>
-    </div>
+
+      {/* Modal */}
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={closeModal}
+        title={modalConfig.title}
+        onConfirm={handleModalConfirm}
+        confirmText={modalConfig.type === 'delete' ? 'Delete' : 'Confirm'}
+        isDestructive={modalConfig.type === 'delete'}
+      >
+        {modalConfig.type === 'delete' ? (
+          <p className="text-slate-600 dark:text-slate-300">
+            Are you sure you want to delete <span className="font-semibold">{modalConfig.item?.title}</span>? This action cannot be undone.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Name
+            </label>
+            <input
+              type="text"
+              value={modalConfig.value}
+              onChange={(e) => setModalConfig(prev => ({ ...prev, value: e.target.value }))}
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Enter name..."
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleModalConfirm();
+              }}
+            />
+          </div>
+        )}
+      </Modal>
+    </div >
   );
 }

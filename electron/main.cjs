@@ -1,0 +1,134 @@
+const { app, BrowserWindow, ipcMain } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const { promises: fsPromises } = fs;
+
+function createWindow() {
+    const win = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.cjs'),
+            nodeIntegration: false,
+            contextIsolation: true,
+        },
+    });
+
+    const isDev = process.env.NODE_ENV === 'development';
+
+    if (isDev) {
+        win.loadURL('http://localhost:5173/'); // Vite dev server URL
+        win.webContents.openDevTools();
+    } else {
+        win.loadFile(path.join(__dirname, '../dist/index.html'));
+    }
+}
+
+// Disable hardware acceleration to fix GPU crashes
+app.disableHardwareAcceleration();
+
+app.whenReady().then(() => {
+    createWindow();
+
+    app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+            createWindow();
+        }
+    });
+});
+
+app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+        app.quit();
+    }
+});
+
+// --- IPC Handlers ---
+
+// Helper to get absolute path
+const getPath = (relativePath) => {
+    // In dev, relative to project root. In prod, might need adjustment.
+    // For now, let's assume we are running from project root or providing absolute paths.
+    // Actually, let's make the frontend send paths relative to the 'content' directory usually,
+    // but for flexibility, let's assume the frontend knows the structure or we define a root.
+    // Let's define the content root as the 'content' folder in the project.
+    return path.join(__dirname, '..', relativePath);
+};
+
+ipcMain.handle('read-file', async (event, filePath) => {
+    try {
+        const content = await fsPromises.readFile(filePath, 'utf-8');
+        return { success: true, content };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('write-file', async (event, filePath, content) => {
+    try {
+        await fsPromises.writeFile(filePath, content, 'utf-8');
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('create-file', async (event, filePath, content = '') => {
+    try {
+        await fsPromises.writeFile(filePath, content, 'utf-8');
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('delete-file', async (event, filePath) => {
+    try {
+        // Use rm with recursive: true to handle both files and directories
+        await fsPromises.rm(filePath, { recursive: true, force: true });
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('create-dir', async (event, dirPath) => {
+    try {
+        await fsPromises.mkdir(dirPath, { recursive: true });
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('rename-path', async (event, oldPath, newPath) => {
+    try {
+        await fsPromises.rename(oldPath, newPath);
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// We might need a way to get the project root path to the frontend so it knows where to look
+ipcMain.handle('get-root-path', () => {
+    return path.resolve(__dirname, '..');
+});
+
+ipcMain.handle('run-generator', async () => {
+    const { exec } = require('child_process');
+    const scriptPath = path.join(__dirname, '../scripts/generate-content.js');
+
+    return new Promise((resolve) => {
+        exec(`node "${scriptPath}"`, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`exec error: ${error}`);
+                resolve({ success: false, error: error.message });
+                return;
+            }
+            console.log(`stdout: ${stdout}`);
+            if (stderr) console.error(`stderr: ${stderr}`);
+            resolve({ success: true });
+        });
+    });
+});

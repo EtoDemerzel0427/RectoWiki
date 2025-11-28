@@ -1,7 +1,7 @@
 ---
 title: 关于这个 Wiki
-date: 2023-10-24
-tags: [Intro, System]
+date: 2025-11-28
+tags: [Intro, About]
 category: Meta
 ---
 
@@ -11,7 +11,7 @@ category: Meta
 
 > “数字花园”与博客不同，它不追求完成度，而追求生长的过程。
 
-## 为什么建立这个？
+## 为什么建立这个Wiki？
 
 1. **碎片化记录**：有些东西不值得写成一篇完整的 Blog。
 2. **知识互联**：通过标签和分类建立联系。

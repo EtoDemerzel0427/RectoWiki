@@ -25,3 +25,11 @@ dist-ssr
 
 # Generated Content
 public/content.json
+
+# Electron Builder
+release
+*.dmg
+*.zip
+*.exe
+*.app
+*.drp
