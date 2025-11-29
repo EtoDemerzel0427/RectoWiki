@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     renamePath: (oldPath, newPath) => ipcRenderer.invoke('rename-path', oldPath, newPath),
     getRootPath: () => ipcRenderer.invoke('get-root-path'),
     runGenerator: () => ipcRenderer.invoke('run-generator'),
+    getContent: () => ipcRenderer.invoke('get-content'),
+    onContentUpdated: (callback) => {
+        const subscription = (event, data) => callback(data);
+        ipcRenderer.on('content-updated', subscription);
+        return () => ipcRenderer.removeListener('content-updated', subscription);
+    },
     onAutoSaveChange: (callback) => ipcRenderer.on('auto-save-change', (event, value) => callback(value)),
     getAutoSaveStatus: () => ipcRenderer.invoke('get-auto-save-status'),
     selectContentFolder: () => ipcRenderer.invoke('select-content-folder'),

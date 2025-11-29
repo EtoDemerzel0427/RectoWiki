@@ -10,10 +10,11 @@ export const useFileSystem = () => {
     const loadNotes = useCallback(async (isBackground = false) => {
         if (!isBackground) setLoading(true);
         try {
-            let data;
             if (isElectron()) {
-                const jsonContent = await readFile('public/content.json');
-                data = JSON.parse(jsonContent);
+                // Use new IPC to get content from ContentManager
+                const { nodes, config } = await window.electronAPI.getContent();
+                setNotes(nodes || []);
+                setWikiConfig(config || {});
             } else {
                 const response = await fetch(`${import.meta.env.BASE_URL}content.json?t=${Date.now()}`, {
                     cache: 'no-store',
@@ -23,15 +24,15 @@ export const useFileSystem = () => {
                     }
                 });
                 if (!response.ok) throw new Error('Failed to load content');
-                data = await response.json();
-            }
+                const data = await response.json();
 
-            // Handle new format { nodes: [], config: {} } vs old format []
-            if (Array.isArray(data)) {
-                setNotes(data);
-            } else if (data.nodes) {
-                setNotes(data.nodes);
-                if (data.config) setWikiConfig(data.config);
+                // Handle new format { nodes: [], config: {} } vs old format []
+                if (Array.isArray(data)) {
+                    setNotes(data);
+                } else if (data.nodes) {
+                    setNotes(data.nodes);
+                    if (data.config) setWikiConfig(data.config);
+                }
             }
         } catch (err) {
             console.error("Failed to load content:", err);
@@ -125,9 +126,6 @@ category: ${initialCategory}
             };
             setNotes(prev => [...prev, newFolder]);
             await updateMeta(parentId, name);
-
-            // Trigger content regeneration
-            await window.electronAPI.runGenerator();
 
         } catch (error) {
             alert("Failed to create folder: " + error.message);
@@ -349,10 +347,11 @@ category: ${initialCategory}
             await writeFile(configPath, JSON.stringify(newConfig, null, 2));
 
             // Trigger generator to update content.json
-            const result = await window.electronAPI.runGenerator();
-            if (!result.success) {
-                alert("Failed to regenerate content: " + result.error);
-            }
+            // No longer needed with ContentManager watcher
+            // const result = await window.electronAPI.runGenerator();
+            // if (!result.success) {
+            //     alert("Failed to regenerate content: " + result.error);
+            // }
         } catch (error) {
             console.error("Failed to save config:", error);
             alert("Failed to save settings: " + error.message);

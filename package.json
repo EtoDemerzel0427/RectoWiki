@@ -1,7 +1,7 @@
 {
   "name": "wiki",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "electron:build": "npm run gen-content && cross-env ELECTRON_BUILD=true vite build && electron-builder",
-    "gen-content": "node scripts/generate-content.js"
+    "gen-content": "node scripts/generate-content.js",
+    "test": "vitest run"
   },
   "build": {
     "appId": "club.huangweiran.metawiki",
@@ -54,6 +55,7 @@
   },
   "main": "electron/main.cjs",
   "dependencies": {
+    "chokidar": "^5.0.0",
     "fs-extra": "^11.3.2",
     "glob": "^13.0.0",
     "gray-matter": "^4.0.3",
@@ -82,6 +84,7 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "vite": "^7.2.4",
+    "vitest": "^4.0.14",
     "wait-on": "^9.0.3"
   }
 }

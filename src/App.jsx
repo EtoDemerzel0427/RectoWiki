@@ -68,7 +68,9 @@ const buildTree = (items) => {
         return a.isFolder ? -1 : 1;
       }
 
-      return a.title.localeCompare(b.title);
+      const titleA = a.title || a.id || '';
+      const titleB = b.title || b.id || '';
+      return titleA.localeCompare(titleB);
     });
   };
 

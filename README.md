@@ -10,7 +10,7 @@
     </a>
   </p>
   <p>
-    <b>Latest Release: v0.1.0 is out!</b> <a href="https://github.com/EtoDemerzel0427/wiki/releases">Download for macOS/Windows/Linux</a>
+    <b>Latest Release: v0.3.0 is out!</b> <a href="https://github.com/EtoDemerzel0427/wiki/releases">Download for macOS/Windows/Linux</a>
   </p>
   <p>
     <img src="docs/images/web-view.png" alt="Web View" width="45%" />
@@ -18,7 +18,9 @@
   </p>
 </div>
 
-A modern, personal wiki application built with React, Vite, and Tailwind CSS. It features a file-based content system, Markdown rendering with math and code support, and a responsive, beautiful UI.
+**Meta Wiki** offers the best of both worlds: a **Static Web Wiki** for hosting your knowledge online, and a **Native Desktop App** for offline editing and management.
+
+Built with React, Vite, and Electron, it seamlessly bridges the gap between a public digital garden and a private, local-first note-taking tool.
 
 ## Features
 
@@ -38,10 +40,14 @@ A modern, personal wiki application built with React, Vite, and Tailwind CSS. It
 meta-wiki/
 ├── content/           # Your Markdown files (the wiki content)
 ├── public/            # Static assets
-│   ├── content.json   # Generated content index (do not edit manually)
+│   ├── content.json   # Generated content index (for dev/web)
 │   └── logo.png       # Application logo
 ├── scripts/           # Build scripts
 │   └── generate-content.js # Script to parse markdown and generate JSON
+├── electron/          # Electron main process code
+│   ├── main.cjs       # Main process entry point
+│   ├── preload.cjs    # Preload script
+│   └── contentManager.mjs # Content indexing and watching logic
 ├── src/               # React source code
 ├── index.html         # Entry point
 ├── vite.config.js     # Vite configuration
@@ -89,20 +95,19 @@ meta-wiki/
       ```
 
 3.  **Updating Content**:
-    - Whenever you add or modify markdown files, run the generator script to update `content.json`:
-      ```bash
-      npm run gen-content
-      ```
-    - You may need to restart the dev server or refresh the page to see changes.
+    - **Web Mode**: Run `npm run gen-content` to update `content.json`.
+    - **Electron Mode**: Content is updated **automatically in real-time** as you save files!
 
 ## Desktop App (Electron)
 
-This project also includes a desktop application wrapper built with Electron, providing a native experience with local file system access.
+This project provides a robust desktop application wrapper built with Electron.
 
 ![Screenshot](public/screenshot.png)
 
 ### Features
 
+- **Real-Time Updates**: Edits to markdown files are reflected instantly in the app.
+- **Custom Content Location**: Choose any folder on your computer to serve as your wiki.
 - **Local File System**: Directly edit files on your hard drive.
 - **Native Menus**: Context menus for file operations (rename, delete, etc.).
 - **Offline Capable**: Works without an internet connection.
@@ -125,6 +130,15 @@ This project also includes a desktop application wrapper built with Electron, pr
     > ```bash
     > xattr -cr /Applications/MetaWiki.app
     > ```
+
+## Testing
+
+We use `vitest` for unit testing. The test suite covers the Content Manager, File System utilities, and Build Scripts.
+
+Run all tests with:
+```bash
+npm test
+```
 
 ## Publishing to the Web
  

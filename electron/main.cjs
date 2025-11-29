@@ -103,226 +103,215 @@ function createWindow() {
     }
 }
 
-// Ensure content.json exists before starting
-// Ensure content.json exists before starting
-const ensureContentGenerated = async () => {
+// Disable hardware acceleration to fix GPU crashes
+app.disableHardwareAcceleration();
+
+app.whenReady().then(async () => {
+    // Load settings
     const settings = loadSettings();
-
-    let scriptPath;
+    let contentPath = path.join(__dirname, '../content'); // Default dev
     if (app.isPackaged) {
-        scriptPath = path.join(app.getAppPath(), 'scripts/generate-content.js');
-    } else {
-        scriptPath = path.join(__dirname, '../scripts/generate-content.js');
+        contentPath = path.join(process.resourcesPath, 'content');
+        if (settings.contentPath) {
+            contentPath = settings.contentPath;
+        }
+    } else if (settings.contentPath) {
+        contentPath = settings.contentPath;
     }
 
-    let contentDir = path.join(__dirname, '../content'); // Default dev
-    let outputFile = path.join(__dirname, '../public/content.json'); // Default dev
+    const mainWindow = createWindow();
 
-    if (app.isPackaged) {
-        if (!settings.contentPath) return;
-    }
+    // Initialize Content Manager
+    const { default: ContentManager } = await import('./contentManager.mjs');
+    let contentManager; // Declare contentManager here
+    contentManager = new ContentManager(mainWindow);
+    await contentManager.initialize(contentPath);
 
-    if (settings.contentPath) {
-        contentDir = settings.contentPath;
-        outputFile = path.join(settings.contentPath, 'content.json');
-    }
+    app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
 
-    // Check if output file exists
-    if (!fs.existsSync(outputFile)) {
-        console.log('[Main] content.json missing, generating...');
+
+    app.on('window-all-closed', () => {
+        if (process.platform !== 'darwin') {
+            app.quit();
+        }
+    });
+
+    // --- IPC Handlers ---
+
+    // --- IPC Handlers ---
+
+    // Helper to get absolute path
+    const getPath = (relativePath) => {
+        const settings = loadSettings();
+
+        // Handle custom content path
+        if (settings.contentPath) {
+            // If requesting content.json
+            if (relativePath === 'public/content.json') {
+                return path.join(settings.contentPath, 'content.json');
+            }
+            // If requesting a file in content/
+            if (relativePath.startsWith('content/')) {
+                const subPath = relativePath.replace(/^content\//, '');
+                return path.join(settings.contentPath, subPath);
+            }
+        }
+
+        if (app.isPackaged) {
+            // In production, resources are in process.resourcesPath
+            return path.join(process.resourcesPath, relativePath);
+        }
+        // In dev, relative to project root
+        return path.join(__dirname, '..', relativePath);
+    };
+
+    ipcMain.handle('read-file', async (event, filePath) => {
+        try {
+            const absolutePath = getPath(filePath);
+            const content = await fsPromises.readFile(absolutePath, 'utf-8');
+            return { success: true, content };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('write-file', async (event, filePath, content) => {
+        try {
+            const absolutePath = getPath(filePath);
+            // Ensure directory exists for the file
+            await fsPromises.mkdir(path.dirname(absolutePath), { recursive: true });
+            await fsPromises.writeFile(absolutePath, content, 'utf-8');
+            return { success: true };
+        } catch (error) {
+            console.error(`[Main] Write failed: ${error.message}`);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('create-file', async (event, filePath, content = '') => {
+        try {
+            const absolutePath = getPath(filePath);
+            await fsPromises.mkdir(path.dirname(absolutePath), { recursive: true });
+            await fsPromises.writeFile(absolutePath, content, 'utf-8');
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('delete-file', async (event, filePath) => {
+        try {
+            const absolutePath = getPath(filePath);
+            // Use rm with recursive: true to handle both files and directories
+            await fsPromises.rm(absolutePath, { recursive: true, force: true });
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('create-dir', async (event, dirPath) => {
+        try {
+            const absolutePath = getPath(dirPath);
+            await fsPromises.mkdir(absolutePath, { recursive: true });
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('rename-path', async (event, oldPath, newPath) => {
+        try {
+            const absoluteOldPath = getPath(oldPath);
+            const absoluteNewPath = getPath(newPath);
+            await fsPromises.rename(absoluteOldPath, absoluteNewPath);
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    // We might need a way to get the project root path to the frontend so it knows where to look
+    ipcMain.handle('get-root-path', () => {
+        return path.resolve(__dirname, '..');
+    });
+
+    ipcMain.handle('run-generator', async () => {
+        const settings = loadSettings();
+
+        let scriptPath;
+        if (app.isPackaged) {
+            scriptPath = path.join(app.getAppPath(), 'scripts/generate-content.js');
+        } else {
+            scriptPath = path.join(__dirname, '../scripts/generate-content.js');
+        }
+
+        let contentDir = undefined;
+        let outputFile = undefined;
+
+        if (settings.contentPath) {
+            contentDir = settings.contentPath;
+            outputFile = path.join(settings.contentPath, 'content.json');
+        }
+
         try {
             const { pathToFileURL } = require('url');
             const scriptUrl = pathToFileURL(scriptPath).href;
             const { generateContent } = await import(scriptUrl);
             await generateContent(contentDir, outputFile);
-            console.log('[Main] Content generated successfully.');
+            return { success: true };
         } catch (error) {
-            console.error(`[Main] Failed to generate content: ${error}`);
+            console.error(`Generator error: ${error}`);
+            return { success: false, error: error.message };
         }
-    }
-};
+    });
 
-// Disable hardware acceleration to fix GPU crashes
-app.disableHardwareAcceleration();
+    ipcMain.handle('get-auto-save-status', () => {
+        const menu = Menu.getApplicationMenu();
+        if (!menu) return false;
+        const fileMenu = menu.items.find(item => item.label === 'File');
+        if (!fileMenu) return false;
+        const autoSave = fileMenu.submenu.items.find(item => item.label === 'Auto Save');
+        return autoSave ? autoSave.checked : false;
+    });
 
-app.whenReady().then(async () => {
-    await ensureContentGenerated();
-    createWindow();
+    // Settings IPCs
+    const { dialog } = require('electron');
 
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
+    ipcMain.handle('select-content-folder', async () => {
+        const result = await dialog.showOpenDialog({
+            properties: ['openDirectory']
+        });
+        if (!result.canceled && result.filePaths.length > 0) {
+            return result.filePaths[0];
         }
+        return null;
+    });
+
+    ipcMain.handle('get-settings', () => {
+        return loadSettings();
+    });
+
+    ipcMain.handle('save-settings', async (event, newSettings) => {
+        saveSettings(newSettings);
+
+        // Update Content Manager path if changed
+        if (newSettings.contentPath && contentManager) {
+            if (newSettings.contentPath !== contentManager.contentPath) {
+                await contentManager.initialize(newSettings.contentPath);
+            }
+        }
+
+        return { success: true };
+    });
+
+    ipcMain.handle('get-content', async () => {
+        if (contentManager) {
+            return contentManager.getContent();
+        }
+        return { nodes: [], config: {} };
     });
 });
 
-app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-        app.quit();
-    }
-});
-
-// --- IPC Handlers ---
-
-// --- IPC Handlers ---
-
-// Helper to get absolute path
-const getPath = (relativePath) => {
-    const settings = loadSettings();
-
-    // Handle custom content path
-    if (settings.contentPath) {
-        // If requesting content.json
-        if (relativePath === 'public/content.json') {
-            return path.join(settings.contentPath, 'content.json');
-        }
-        // If requesting a file in content/
-        if (relativePath.startsWith('content/')) {
-            const subPath = relativePath.replace(/^content\//, '');
-            return path.join(settings.contentPath, subPath);
-        }
-    }
-
-    if (app.isPackaged) {
-        // In production, resources are in process.resourcesPath
-        return path.join(process.resourcesPath, relativePath);
-    }
-    // In dev, relative to project root
-    return path.join(__dirname, '..', relativePath);
-};
-
-ipcMain.handle('read-file', async (event, filePath) => {
-    try {
-        const absolutePath = getPath(filePath);
-        const content = await fsPromises.readFile(absolutePath, 'utf-8');
-        return { success: true, content };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('write-file', async (event, filePath, content) => {
-    try {
-        const absolutePath = getPath(filePath);
-        // Ensure directory exists for the file
-        await fsPromises.mkdir(path.dirname(absolutePath), { recursive: true });
-        await fsPromises.writeFile(absolutePath, content, 'utf-8');
-        return { success: true };
-    } catch (error) {
-        console.error(`[Main] Write failed: ${error.message}`);
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('create-file', async (event, filePath, content = '') => {
-    try {
-        const absolutePath = getPath(filePath);
-        await fsPromises.mkdir(path.dirname(absolutePath), { recursive: true });
-        await fsPromises.writeFile(absolutePath, content, 'utf-8');
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('delete-file', async (event, filePath) => {
-    try {
-        const absolutePath = getPath(filePath);
-        // Use rm with recursive: true to handle both files and directories
-        await fsPromises.rm(absolutePath, { recursive: true, force: true });
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('create-dir', async (event, dirPath) => {
-    try {
-        const absolutePath = getPath(dirPath);
-        await fsPromises.mkdir(absolutePath, { recursive: true });
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('rename-path', async (event, oldPath, newPath) => {
-    try {
-        const absoluteOldPath = getPath(oldPath);
-        const absoluteNewPath = getPath(newPath);
-        await fsPromises.rename(absoluteOldPath, absoluteNewPath);
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-// We might need a way to get the project root path to the frontend so it knows where to look
-ipcMain.handle('get-root-path', () => {
-    return path.resolve(__dirname, '..');
-});
-
-ipcMain.handle('run-generator', async () => {
-    const settings = loadSettings();
-
-    let scriptPath;
-    if (app.isPackaged) {
-        scriptPath = path.join(app.getAppPath(), 'scripts/generate-content.js');
-    } else {
-        scriptPath = path.join(__dirname, '../scripts/generate-content.js');
-    }
-
-    let contentDir = undefined;
-    let outputFile = undefined;
-
-    if (settings.contentPath) {
-        contentDir = settings.contentPath;
-        outputFile = path.join(settings.contentPath, 'content.json');
-    }
-
-    try {
-        const { pathToFileURL } = require('url');
-        const scriptUrl = pathToFileURL(scriptPath).href;
-        const { generateContent } = await import(scriptUrl);
-        await generateContent(contentDir, outputFile);
-        return { success: true };
-    } catch (error) {
-        console.error(`Generator error: ${error}`);
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('get-auto-save-status', () => {
-    const menu = Menu.getApplicationMenu();
-    if (!menu) return false;
-    const fileMenu = menu.items.find(item => item.label === 'File');
-    if (!fileMenu) return false;
-    const autoSave = fileMenu.submenu.items.find(item => item.label === 'Auto Save');
-    return autoSave ? autoSave.checked : false;
-});
-
-// Settings IPCs
-const { dialog } = require('electron');
-
-ipcMain.handle('select-content-folder', async () => {
-    const result = await dialog.showOpenDialog({
-        properties: ['openDirectory']
-    });
-    if (!result.canceled && result.filePaths.length > 0) {
-        return result.filePaths[0];
-    }
-    return null;
-});
-
-ipcMain.handle('get-settings', () => {
-    return loadSettings();
-});
-
-ipcMain.handle('save-settings', async (event, newSettings) => {
-    saveSettings(newSettings);
-    // If content path changed, ensure content.json exists in the new location
-    await ensureContentGenerated();
-    // If content path changed, we might need to reload window or notify frontend
-    // For now, frontend handles reload
-    return { success: true };
-});

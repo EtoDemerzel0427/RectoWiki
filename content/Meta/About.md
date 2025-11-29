@@ -1,5 +1,5 @@
 ---
-title: 关于这个 Wik
+title: 关于这个 Wiki
 slug: about
 date: 2025-11-28
 tags: [Intro, About]
