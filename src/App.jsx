@@ -20,14 +20,15 @@ import {
   Home,
   Edit,
   Save,
-  Eye
+  Eye,
+  Type
 } from 'lucide-react';
 import Editor from './components/Editor';
 import Preview from './components/Preview';
 import Sidebar from './components/Sidebar';
 import Modal from './components/Modal';
 import { isElectron, readFile, writeFile } from './utils/fileSystem';
-import { parseFrontmatter } from './utils/frontmatter';
+import { parseFrontmatter, stringifyFrontmatter } from './utils/frontmatter';
 import { useFileSystem } from './hooks/useFileSystem';
 
 // --- 工具函数：构建树形结构 ---
@@ -153,12 +154,21 @@ export default function App() {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTitle, setSettingsTitle] = useState('');
+  const [settingsFontTheme, setSettingsFontTheme] = useState('');
+  const [settingsFontSize, setSettingsFontSize] = useState('base');
+
+  // Page Appearance State
+  const [isPageAppearanceOpen, setIsPageAppearanceOpen] = useState(false);
+  const [pageFontTheme, setPageFontTheme] = useState('');
+  const [pageFontSize, setPageFontSize] = useState('');
 
   useEffect(() => {
-    if (wikiConfig?.title) {
-      setSettingsTitle(wikiConfig.title);
+    if (wikiConfig) {
+      setSettingsTitle(wikiConfig.title || '');
+      setSettingsFontTheme(wikiConfig.fontTheme || '');
+      setSettingsFontSize(wikiConfig.fontSize || 'base');
       // Update document title
-      document.title = wikiConfig.title;
+      if (wikiConfig.title) document.title = wikiConfig.title;
     }
   }, [wikiConfig]);
 
@@ -516,6 +526,8 @@ export default function App() {
     return <div className="h-screen flex items-center justify-center text-slate-500">Loading wiki...</div>;
   }
 
+  const effectiveFontSize = viewMetadata.fontSize || wikiConfig?.fontSize || 'base';
+
   return (
     <div className={`h-screen w-full flex flex-col md:flex-row bg-white dark:bg-slate-950 transition-colors duration-200 overflow-hidden ${darkMode ? 'dark' : ''}`}>
 
@@ -559,7 +571,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 h-full bg-white dark:bg-slate-950 flex flex-col relative overflow-hidden">
+      <div className={`flex-1 h-full bg-white dark:bg-slate-950 flex flex-col relative overflow-hidden ${viewMetadata.fontTheme || wikiConfig.fontTheme || ''}`}>
         {activeNote ? (
           <>
             {isEditMode && isElectron() ? (
@@ -572,6 +584,7 @@ export default function App() {
                     onNavigate={(id) => handleNavigate(id)}
                     selectedTag={selectedTag}
                     onTagClick={setSelectedTag}
+                    fontSize={effectiveFontSize}
                   />
                 </div>
                 <div className="w-1/2 h-full">
@@ -589,6 +602,7 @@ export default function App() {
                       setViewMetadata(metadata);
                       setViewBody(body);
                     }}
+                    fontSize={effectiveFontSize}
                   />
                 </div>
               </div>
@@ -609,6 +623,7 @@ export default function App() {
                       setViewMetadata(metadata);
                       setViewBody(body);
                     }}
+                    fontSize={effectiveFontSize}
                   />
                 ) : (
                   <Preview
@@ -618,6 +633,7 @@ export default function App() {
                     onNavigate={(id) => handleNavigate(id)}
                     selectedTag={selectedTag}
                     onTagClick={setSelectedTag}
+                    fontSize={effectiveFontSize}
                   />
                 )}
               </div>
@@ -641,7 +657,85 @@ export default function App() {
             </button>
           )
         }
+
+        {/* Page Appearance Button - Electron Only */}
+        {
+          activeNote && isElectron() && (
+            <button
+              onClick={() => {
+                setPageFontTheme(viewMetadata.fontTheme || '');
+                setPageFontSize(viewMetadata.fontSize || '');
+                setIsPageAppearanceOpen(true);
+              }}
+              className="absolute top-6 right-20 p-2 bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors z-10"
+              title="Page Appearance"
+            >
+              <Type size={20} />
+            </button>
+          )
+        }
       </div >
+
+      {/* Page Appearance Modal */}
+      <Modal
+        isOpen={isPageAppearanceOpen}
+        onClose={() => setIsPageAppearanceOpen(false)}
+        title="Page Appearance"
+        onConfirm={async () => {
+          // Update frontmatter
+          const { metadata, body } = parseFrontmatter(fileContent);
+          const newMetadata = { ...metadata, fontTheme: pageFontTheme, fontSize: pageFontSize };
+
+          // Remove if empty to fallback to global
+          if (!pageFontTheme) delete newMetadata.fontTheme;
+          if (!pageFontSize) delete newMetadata.fontSize;
+
+          // Reconstruct file content
+          const newContent = stringifyFrontmatter(newMetadata, body);
+
+          await handleSaveContent(newContent);
+          setIsPageAppearanceOpen(false);
+        }}
+        confirmText="Save"
+      >
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            Font Theme (This Page Only)
+          </label>
+          <select
+            value={pageFontTheme}
+            onChange={(e) => setPageFontTheme(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="">Use Global Default</option>
+            <option value="theme-serif">Elegant Serif</option>
+            <option value="theme-academic">Academic</option>
+            <option value="theme-system">System Native</option>
+            <option value="theme-ink">Chinese Ink (楷体)</option>
+            <option value="theme-song">Chinese Song (宋体)</option>
+          </select>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Overrides the global font setting for this specific page.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            Content Size (This Page Only)
+          </label>
+          <select
+            value={pageFontSize}
+            onChange={(e) => setPageFontSize(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="">Use Global Default</option>
+            <option value="sm">Small</option>
+            <option value="base">Normal</option>
+            <option value="lg">Large</option>
+            <option value="xl">Extra Large</option>
+          </select>
+        </div>
+      </Modal>
 
       {/* Modal */}
       < Modal
@@ -684,7 +778,11 @@ export default function App() {
         onClose={() => setIsSettingsOpen(false)}
         title="Settings"
         onConfirm={async () => {
-          saveConfig({ title: settingsTitle });
+          saveConfig({
+            title: settingsTitle,
+            fontTheme: settingsFontTheme,
+            fontSize: settingsFontSize
+          });
 
           if (isElectron() && window.electronAPI?.saveSettings) {
             await window.electronAPI.saveSettings({ contentPath });
@@ -708,6 +806,40 @@ export default function App() {
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder="Enter wiki title..."
             />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Font Theme
+            </label>
+            <select
+              value={settingsFontTheme}
+              onChange={(e) => setSettingsFontTheme(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">Modern Sans (Default)</option>
+              <option value="theme-serif">Elegant Serif</option>
+              <option value="theme-academic">Academic</option>
+              <option value="theme-system">System Native</option>
+              <option value="theme-ink">Chinese Ink (楷体)</option>
+              <option value="theme-song">Chinese Song (宋体)</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Content Size
+            </label>
+            <select
+              value={settingsFontSize}
+              onChange={(e) => setSettingsFontSize(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="sm">Small</option>
+              <option value="base">Normal</option>
+              <option value="lg">Large</option>
+              <option value="xl">Extra Large</option>
+            </select>
           </div>
 
           {isElectron() && (

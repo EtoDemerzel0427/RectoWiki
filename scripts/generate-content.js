@@ -44,7 +44,7 @@ async function generate() {
             category: data.category || segments[0] || 'General',
             tags: data.tags || [],
             date,
-            content,
+            content: source, // Use full source to preserve frontmatter for web parser
             parentId: segments.length > 1 ? segments.slice(0, -1).join('/') : null,
             isFolder: false,
             fileName: fileName + '.md' // Store actual filename for matching

@@ -49,17 +49,33 @@ export const parseFrontmatter = (content) => {
 };
 
 export const stringifyFrontmatter = (metadata, body) => {
-    const tagsArray = metadata.tags ? metadata.tags.split(',').map(t => t.trim()).filter(t => t) : [];
+    const yamlLines = ['---'];
 
-    const yamlLines = [
-        '---',
-        `title: ${metadata.title || ''}`,
-        `slug: ${metadata.slug || ''}`,
-        `date: ${metadata.date || new Date().toISOString().split('T')[0]}`,
-        `tags: [${tagsArray.join(', ')}]`,
-        `category: ${metadata.category || ''}`,
-        '---'
-    ];
+    // Define preferred order for common keys
+    const order = ['title', 'slug', 'date', 'tags', 'category', 'fontTheme'];
+
+    // Add known keys in order
+    order.forEach(key => {
+        if (metadata[key] !== undefined) {
+            if (key === 'tags') {
+                const tagsArray = Array.isArray(metadata.tags)
+                    ? metadata.tags
+                    : (metadata.tags ? metadata.tags.split(',').map(t => t.trim()).filter(t => t) : []);
+                yamlLines.push(`tags: [${tagsArray.join(', ')}]`);
+            } else {
+                yamlLines.push(`${key}: ${metadata[key]}`);
+            }
+        }
+    });
+
+    // Add any other keys not in the preferred order
+    Object.keys(metadata).forEach(key => {
+        if (!order.includes(key)) {
+            yamlLines.push(`${key}: ${metadata[key]}`);
+        }
+    });
+
+    yamlLines.push('---');
 
     return `${yamlLines.join('\n')}\n\n${body || ''}`;
 };

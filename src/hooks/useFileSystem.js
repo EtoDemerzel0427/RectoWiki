@@ -44,6 +44,8 @@ export const useFileSystem = () => {
         loadNotes();
     }, [loadNotes]);
 
+
+
     const handleCreateFile = async (name, parentId = null) => {
         if (!isElectron() || !name) return;
 

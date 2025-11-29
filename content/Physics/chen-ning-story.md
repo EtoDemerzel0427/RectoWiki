@@ -4,6 +4,8 @@ slug: chen-ning-yang
 date: 2025-11-28
 tags: [People]
 category: Physics
+fontTheme: theme-ink
+fontSize: xl
 ---
 
 杨振宁是伟大的物理学家，诺贝尔物理学奖得主。

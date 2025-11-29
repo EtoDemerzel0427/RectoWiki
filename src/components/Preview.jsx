@@ -18,7 +18,8 @@ const Preview = ({
     activeNote,
     onNavigate,
     selectedTag,
-    onTagClick
+    onTagClick,
+    fontSize
 }) => {
     // Pre-process content to handle [[WikiLinks]]
     const processContent = (content) => {
@@ -101,6 +102,13 @@ const Preview = ({
         );
     }
 
+    const sizeClass = {
+        'sm': 'prose-sm',
+        'base': 'prose-base',
+        'lg': 'prose-lg',
+        'xl': 'prose-xl'
+    }[fontSize || 'base'];
+
     return (
         <div className="max-w-4xl mx-auto px-6 md:px-12 py-10 md:py-16 min-h-full flex flex-col">
             <div className="flex-1">
@@ -114,7 +122,7 @@ const Preview = ({
                         <span className="text-slate-600 dark:text-slate-300">{metadata.title || activeNote.title}</span>
                     </div>
 
-                    <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-6 leading-tight tracking-tight">
+                    <h1 className="text-4xl font-extrabold font-heading text-slate-900 dark:text-white mb-6 leading-tight tracking-tight">
                         {metadata.title || activeNote.title}
                     </h1>
 
@@ -147,7 +155,7 @@ const Preview = ({
                 </div>
 
                 {/* Note Body */}
-                <div className="prose prose-slate dark:prose-invert max-w-none">
+                <div className={`prose dark:prose-invert max-w-none ${sizeClass}`}>
                     <ReactMarkdown
                         remarkPlugins={[remarkMath]}
                         rehypePlugins={[rehypeKatex]}

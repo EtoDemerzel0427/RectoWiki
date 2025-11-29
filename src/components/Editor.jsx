@@ -3,7 +3,7 @@ import { Save } from 'lucide-react';
 import { isElectron, writeFile } from '../utils/fileSystem';
 import { parseFrontmatter, stringifyFrontmatter } from '../utils/frontmatter';
 
-const Editor = ({ content, filePath, onSave, onChange }) => {
+const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
     const [body, setBody] = useState('');
     const [metadata, setMetadata] = useState({
         title: '',
@@ -11,6 +11,13 @@ const Editor = ({ content, filePath, onSave, onChange }) => {
         tags: '',
         category: ''
     });
+
+    const sizeClass = {
+        'sm': 'text-sm',
+        'base': 'text-base',
+        'lg': 'text-lg',
+        'xl': 'text-xl'
+    }[fontSize || 'base'];
 
     // Parse frontmatter on load or content change
     useEffect(() => {
@@ -135,7 +142,7 @@ const Editor = ({ content, filePath, onSave, onChange }) => {
 
             <div className="flex-1 overflow-hidden relative">
                 <textarea
-                    className="w-full h-full p-8 resize-none focus:outline-none bg-transparent text-slate-800 dark:text-slate-200 font-mono text-base leading-relaxed"
+                    className={`w-full h-full p-8 resize-none focus:outline-none bg-transparent text-slate-800 dark:text-slate-200 font-mono leading-relaxed ${sizeClass}`}
                     value={body}
                     onChange={(e) => updateBody(e.target.value)}
                     placeholder="Start writing..."
