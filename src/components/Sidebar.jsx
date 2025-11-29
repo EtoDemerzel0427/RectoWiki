@@ -177,7 +177,8 @@ const Sidebar = ({
     onRename,
     onReorder,
     wikiTitle,
-    onOpenSettings
+    onOpenSettings,
+    isDesktopSidebarOpen = true
 }) => {
     const [contextMenu, setContextMenu] = useState(null);
 
@@ -213,19 +214,24 @@ const Sidebar = ({
     }, []);
 
     return (
-        <div className={`${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-40 w-64 h-full bg-slate-50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-transform duration-300 flex flex-col flex-shrink-0`}>
-            <div className="p-5 hidden md:flex items-center justify-between border-b border-transparent">
-                <h1 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <img src={`${import.meta.env.BASE_URL}logo.png`} alt="Logo" className="w-8 h-8" />
-                    {wikiTitle}
-                </h1>
-                <button onClick={() => setDarkMode(!darkMode)} className="p-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 transition-colors">
-                    {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-                </button>
-            </div>
+        <div className={`
+            fixed md:relative z-40 h-full bg-slate-50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-300 flex flex-col flex-shrink-0
+            ${isMobileMenuOpen ? 'translate-x-0 w-64' : '-translate-x-full w-64'} 
+            md:translate-x-0 ${isDesktopSidebarOpen ? 'md:w-64' : 'md:w-0 md:overflow-hidden md:border-r-0'}
+        `}>
+            <div className="min-w-[16rem] h-full flex flex-col">
+                <div className="p-5 hidden md:flex items-center justify-between border-b border-transparent">
+                    <h1 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <img src={`${import.meta.env.BASE_URL}logo.png`} alt="Logo" className="w-8 h-8" />
+                        {wikiTitle}
+                    </h1>
+                    <button onClick={() => setDarkMode(!darkMode)} className="p-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 transition-colors">
+                        {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+                    </button>
+                </div>
 
-            {/* Actions Bar (Electron Only) - REMOVED as per user request, moved to Explorer header */}
-            {/* 
+                {/* Actions Bar (Electron Only) - REMOVED as per user request, moved to Explorer header */}
+                {/* 
             {isElectron() && (
                 <div className="px-3 mb-2 flex gap-2">
                     ...
@@ -233,123 +239,124 @@ const Sidebar = ({
             )} 
             */}
 
-            {/* Search & Tag Indicator */}
-            <div className="px-3 mb-2 space-y-2">
-                <div className="relative group">
-                    <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
-                    <input
-                        type="text"
-                        placeholder="Quick find..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-slate-800 dark:text-slate-200"
-                    />
+                {/* Search & Tag Indicator */}
+                <div className="px-3 mb-2 space-y-2">
+                    <div className="relative group">
+                        <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                        <input
+                            type="text"
+                            placeholder="Quick find..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-slate-800 dark:text-slate-200"
+                        />
+                    </div>
+                    {selectedTag && (
+                        <div className="flex items-center justify-between bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 px-3 py-1.5 rounded-md text-xs font-medium border border-indigo-100 dark:border-indigo-800/50">
+                            <span className="flex items-center gap-1"><Tag size={10} /> {selectedTag}</span>
+                            <button onClick={() => setSelectedTag(null)} className="hover:text-indigo-900 dark:hover:text-indigo-100"><X size={12} /></button>
+                        </div>
+                    )}
                 </div>
-                {selectedTag && (
-                    <div className="flex items-center justify-between bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 px-3 py-1.5 rounded-md text-xs font-medium border border-indigo-100 dark:border-indigo-800/50">
-                        <span className="flex items-center gap-1"><Tag size={10} /> {selectedTag}</span>
-                        <button onClick={() => setSelectedTag(null)} className="hover:text-indigo-900 dark:hover:text-indigo-100"><X size={12} /></button>
+
+                {/* Navigation Content */}
+                <nav className="flex-1 overflow-y-auto px-2 pb-4 custom-scrollbar">
+                    {(searchQuery || selectedTag) ? (
+                        <div className="mt-2">
+                            <div className="px-3 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                                Search Results
+                            </div>
+                            {flatFilteredNotes && flatFilteredNotes.length > 0 ? (
+                                flatFilteredNotes.map(note => (
+                                    <div
+                                        key={note.id}
+                                        onClick={() => onNavigate(note.slug || note.id)}
+                                        className="flex flex-col gap-1 px-3 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                                    >
+                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{note.title}</span>
+                                        <span className="text-xs text-slate-400 truncate">{note.content.substring(0, 40)}...</span>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="px-3 text-sm text-slate-400 italic">No notes found.</div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="mt-2">
+                            {/* Explorer Header - Click to clear selection (Root) */}
+                            <div
+                                className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                                onClick={() => {
+                                    // Clear active note to allow root creation
+                                    // We need a way to tell parent to clear activeNoteId
+                                    // For now, we can just expose a prop or use the "New Page" button logic
+                                    // Actually, let's add a "+" button here for Root creation explicitly
+                                }}
+                            >
+                                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Explorer</span>
+                                {isElectron() && (
+                                    <div className="flex gap-1">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onCreateFile(null); // Pass null for root
+                                            }}
+                                            className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded"
+                                            title="New Page in Root"
+                                        >
+                                            <Plus size={14} className="text-slate-500" />
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onCreateDir(null); // Pass null for root
+                                            }}
+                                            className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded"
+                                            title="New Folder in Root"
+                                        >
+                                            <Folder size={14} className="text-slate-500" />
+                                        </button>
+                                    </div>
+                                )}
+                            </div>            {treeData.map((node, index) => (
+                                <TreeNode
+                                    key={node.id}
+                                    node={node}
+                                    activeNoteId={activeNoteId}
+                                    onSelect={(id) => onNavigate(id)}
+                                    expandedNodes={expandedNodes}
+                                    toggleNode={toggleNode}
+                                    onContextMenu={handleContextMenu}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </nav>
+
+                {contextMenu && (
+                    <ContextMenu
+                        x={contextMenu.x}
+                        y={contextMenu.y}
+                        item={contextMenu.item}
+                        onAction={handleAction}
+                        onClose={() => setContextMenu(null)}
+                    // We can pass isFirst/isLast if we calculate it
+                    />
+                )}
+
+                {/* Settings Button (Electron Only) */}
+                {isElectron() && (
+                    <div className="p-4 border-t border-slate-200 dark:border-slate-800">
+                        <button
+                            onClick={onOpenSettings}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition-colors"
+                        >
+                            <Settings size={16} />
+                            Settings
+                        </button>
                     </div>
                 )}
             </div>
-
-            {/* Navigation Content */}
-            <nav className="flex-1 overflow-y-auto px-2 pb-4 custom-scrollbar">
-                {(searchQuery || selectedTag) ? (
-                    <div className="mt-2">
-                        <div className="px-3 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                            Search Results
-                        </div>
-                        {flatFilteredNotes && flatFilteredNotes.length > 0 ? (
-                            flatFilteredNotes.map(note => (
-                                <div
-                                    key={note.id}
-                                    onClick={() => onNavigate(note.slug || note.id)}
-                                    className="flex flex-col gap-1 px-3 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                                >
-                                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{note.title}</span>
-                                    <span className="text-xs text-slate-400 truncate">{note.content.substring(0, 40)}...</span>
-                                </div>
-                            ))
-                        ) : (
-                            <div className="px-3 text-sm text-slate-400 italic">No notes found.</div>
-                        )}
-                    </div>
-                ) : (
-                    <div className="mt-2">
-                        {/* Explorer Header - Click to clear selection (Root) */}
-                        <div
-                            className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                            onClick={() => {
-                                // Clear active note to allow root creation
-                                // We need a way to tell parent to clear activeNoteId
-                                // For now, we can just expose a prop or use the "New Page" button logic
-                                // Actually, let's add a "+" button here for Root creation explicitly
-                            }}
-                        >
-                            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Explorer</span>
-                            {isElectron() && (
-                                <div className="flex gap-1">
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onCreateFile(null); // Pass null for root
-                                        }}
-                                        className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded"
-                                        title="New Page in Root"
-                                    >
-                                        <Plus size={14} className="text-slate-500" />
-                                    </button>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onCreateDir(null); // Pass null for root
-                                        }}
-                                        className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded"
-                                        title="New Folder in Root"
-                                    >
-                                        <Folder size={14} className="text-slate-500" />
-                                    </button>
-                                </div>
-                            )}
-                        </div>            {treeData.map((node, index) => (
-                            <TreeNode
-                                key={node.id}
-                                node={node}
-                                activeNoteId={activeNoteId}
-                                onSelect={(id) => onNavigate(id)}
-                                expandedNodes={expandedNodes}
-                                toggleNode={toggleNode}
-                                onContextMenu={handleContextMenu}
-                            />
-                        ))}
-                    </div>
-                )}
-            </nav>
-
-            {contextMenu && (
-                <ContextMenu
-                    x={contextMenu.x}
-                    y={contextMenu.y}
-                    item={contextMenu.item}
-                    onAction={handleAction}
-                    onClose={() => setContextMenu(null)}
-                // We can pass isFirst/isLast if we calculate it
-                />
-            )}
-
-            {/* Settings Button (Electron Only) */}
-            {isElectron() && (
-                <div className="p-4 border-t border-slate-200 dark:border-slate-800">
-                    <button
-                        onClick={onOpenSettings}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition-colors"
-                    >
-                        <Settings size={16} />
-                        Settings
-                    </button>
-                </div>
-            )}
         </div>
     );
 };

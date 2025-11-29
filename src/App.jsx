@@ -21,7 +21,9 @@ import {
   Edit,
   Save,
   Eye,
-  Type
+  Type,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import Editor from './components/Editor';
 import Preview from './components/Preview';
@@ -106,11 +108,16 @@ export default function App() {
   const [selectedTag, setSelectedTag] = useState(null);
   const [expandedNodes, setExpandedNodes] = useState([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   // const [loading, setLoading] = useState(true); // Handled by hook
   const [isEditMode, setIsEditMode] = useState(false);
   const [fileContent, setFileContent] = useState(''); // Store fresh content from disk
   const [isAutoSaveEnabled, setIsAutoSaveEnabled] = useState(false);
+
+  // Split View State
+  const [splitRatio, setSplitRatio] = useState(0.5);
+  const [isDraggingSplit, setIsDraggingSplit] = useState(false);
 
   // Auto-Save Effect
   useEffect(() => {
@@ -141,6 +148,54 @@ export default function App() {
 
     return () => clearTimeout(timer);
   }, [fileContent, isAutoSaveEnabled, activeNoteId, isEditMode]);
+
+  // Split View Drag Handlers
+  const handleSplitMouseDown = (e) => {
+    e.preventDefault();
+    setIsDraggingSplit(true);
+  };
+
+  useEffect(() => {
+    if (!isDraggingSplit) return;
+
+    const handleMouseMove = (e) => {
+      // Calculate new ratio based on mouse X position relative to window width
+      // We need to account for the sidebar width if it's open
+      // But simpler: just use percentage of the main content area?
+      // Actually, the mouse event is global.
+      // Let's assume the main content area starts after the sidebar.
+      // But the sidebar width is dynamic.
+      // A robust way:
+      // The main content div is the parent. We can get its bounding rect?
+      // But we don't have a ref to it easily here without adding one.
+      // Let's try a simpler approach: 
+      // The split is within the main content area.
+      // If sidebar is 256px (w-64), then content starts at 256px.
+      // Ratio = (MouseX - SidebarWidth) / ContentWidth
+
+      const sidebarWidth = document.querySelector('.md\\:w-64')?.offsetWidth || 0;
+      const contentWidth = window.innerWidth - sidebarWidth;
+      let newRatio = (e.clientX - sidebarWidth) / contentWidth;
+
+      // Clamp ratio
+      if (newRatio < 0.2) newRatio = 0.2;
+      if (newRatio > 0.8) newRatio = 0.8;
+
+      setSplitRatio(newRatio);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingSplit(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingSplit]);
 
   // Modal State
   const [modalConfig, setModalConfig] = useState({
@@ -568,15 +623,28 @@ export default function App() {
         onReorder={handleReorder}
         wikiTitle={wikiConfig?.title || "MetaWiki"}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        isDesktopSidebarOpen={isDesktopSidebarOpen}
       />
 
       {/* Main Content Area */}
       <div className={`flex-1 h-full bg-white dark:bg-slate-950 flex flex-col relative overflow-hidden ${viewMetadata.fontTheme || wikiConfig.fontTheme || ''}`}>
+
+        {/* Desktop Sidebar Toggle */}
+        <button
+          onClick={() => setIsDesktopSidebarOpen(!isDesktopSidebarOpen)}
+          className="hidden md:flex absolute top-4 left-4 z-10 p-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm shadow-sm border border-slate-200 dark:border-slate-700 rounded-md text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+          title={isDesktopSidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
+        >
+          {isDesktopSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
+        </button>
         {activeNote ? (
           <>
             {isEditMode && isElectron() ? (
               <div className="flex-1 flex h-full overflow-hidden">
-                <div className="w-1/2 h-full border-r border-slate-200 dark:border-slate-800 overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-900">
+                <div
+                  className="h-full border-r border-slate-200 dark:border-slate-800 overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-900"
+                  style={{ width: `${splitRatio * 100}%` }}
+                >
                   <Preview
                     content={fileContent}
                     metadata={viewMetadata}
@@ -587,7 +655,14 @@ export default function App() {
                     fontSize={effectiveFontSize}
                   />
                 </div>
-                <div className="w-1/2 h-full">
+
+                {/* Draggable Divider */}
+                <div
+                  className="w-1 h-full cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-500 transition-colors z-10 flex-shrink-0"
+                  onMouseDown={handleSplitMouseDown}
+                />
+
+                <div className="flex-1 h-full overflow-hidden">
                   <Editor
                     content={fileContent}
                     filePath={
