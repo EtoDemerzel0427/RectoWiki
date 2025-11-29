@@ -103,10 +103,56 @@ function createWindow() {
     }
 }
 
+// Ensure content.json exists before starting
+const ensureContentGenerated = async () => {
+    const settings = loadSettings();
+    const { exec } = require('child_process');
+
+    let scriptPath;
+    if (app.isPackaged) {
+        scriptPath = path.join(process.resourcesPath, 'scripts/generate-content.js');
+    } else {
+        scriptPath = path.join(__dirname, '../scripts/generate-content.js');
+    }
+
+    let contentDir = path.join(__dirname, '../content'); // Default dev
+    let outputFile = path.join(__dirname, '../public/content.json'); // Default dev
+
+    if (app.isPackaged) {
+        // In prod, default might be different, but let's assume resourcesPath/content for now if not set
+        // But wait, if not set, we use the bundled content.json?
+        // Actually, if settings.contentPath is NOT set, we rely on the bundled one.
+        // If it IS set, we must ensure it exists.
+        if (!settings.contentPath) return;
+    }
+
+    if (settings.contentPath) {
+        contentDir = settings.contentPath;
+        outputFile = path.join(settings.contentPath, 'content.json');
+    }
+
+    // Check if output file exists
+    if (!fs.existsSync(outputFile)) {
+        console.log('[Main] content.json missing, generating...');
+        return new Promise((resolve) => {
+            const command = `node "${scriptPath}" "${contentDir}" "${outputFile}"`;
+            exec(command, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`[Main] Failed to generate content: ${error}`);
+                } else {
+                    console.log('[Main] Content generated successfully.');
+                }
+                resolve();
+            });
+        });
+    }
+};
+
 // Disable hardware acceleration to fix GPU crashes
 app.disableHardwareAcceleration();
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+    await ensureContentGenerated();
     createWindow();
 
     app.on('activate', () => {
