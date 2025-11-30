@@ -279,13 +279,29 @@ app.whenReady().then(async () => {
         return loadSettings();
     });
 
+    const getDefaultContentPath = () => {
+        if (app.isPackaged) {
+            return path.join(process.resourcesPath, 'content');
+        }
+        return path.join(__dirname, '../content');
+    };
+
     ipcMain.handle('save-settings', async (event, newSettings) => {
-        saveSettings(newSettings);
+        const currentSettings = loadSettings();
+        const mergedSettings = { ...currentSettings, ...newSettings };
+        saveSettings(mergedSettings);
+
+        // Determine target path
+        let targetPath = mergedSettings.contentPath;
+        if (!targetPath) {
+            targetPath = getDefaultContentPath();
+        }
 
         // Update Content Manager path if changed
-        if (newSettings.contentPath && contentManager) {
-            if (newSettings.contentPath !== contentManager.contentPath) {
-                await contentManager.initialize(newSettings.contentPath);
+        if (contentManager) {
+            if (targetPath !== contentManager.contentPath) {
+                console.log(`[Main] Switching content path to: ${targetPath}`);
+                await contentManager.initialize(targetPath);
             }
         }
 

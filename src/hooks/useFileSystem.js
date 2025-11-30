@@ -14,7 +14,8 @@ export const useFileSystem = () => {
                 // Use new IPC to get content from ContentManager
                 const { nodes, config } = await window.electronAPI.getContent();
                 setNotes(nodes || []);
-                setWikiConfig(config || {});
+                // Reset to default if config is empty (crucial for location switching)
+                setWikiConfig(config && Object.keys(config).length > 0 ? config : { title: "RectoWiki" });
             } else {
                 const response = await fetch(`${import.meta.env.BASE_URL}content.json?t=${Date.now()}`, {
                     cache: 'no-store',
@@ -31,7 +32,11 @@ export const useFileSystem = () => {
                     setNotes(data);
                 } else if (data.nodes) {
                     setNotes(data.nodes);
-                    if (data.config) setWikiConfig(data.config);
+                    if (data.config) {
+                        setWikiConfig(data.config);
+                    } else {
+                        setWikiConfig({ title: "RectoWiki" });
+                    }
                 }
             }
         } catch (err) {
@@ -43,6 +48,17 @@ export const useFileSystem = () => {
 
     useEffect(() => {
         loadNotes();
+
+        // Listen for content updates from backend (Electron)
+        if (isElectron() && window.electronAPI?.onContentUpdated) {
+            const cleanup = window.electronAPI.onContentUpdated((data) => {
+                console.log("Received content update from backend", data);
+                if (data.nodes) setNotes(data.nodes);
+                if (data.config) setWikiConfig(data.config);
+                setLoading(false);
+            });
+            return cleanup;
+        }
     }, [loadNotes]);
 
 

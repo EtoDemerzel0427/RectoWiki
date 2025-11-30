@@ -35,5 +35,10 @@ export default defineConfig(({ mode }) => ({
         }
       }
     }
+  },
+  server: {
+    watch: {
+      ignored: ['**/content/**', '**/public/content.json']
+    }
   }
 }))

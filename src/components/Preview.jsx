@@ -2,6 +2,7 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import 'katex/dist/katex.min.css';
@@ -61,8 +62,8 @@ const Preview = ({
         h2: ({ node, ...props }) => <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-6 mb-3" {...props} />,
         h3: ({ node, ...props }) => <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-5 mb-2" {...props} />,
         blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-indigo-500 pl-4 py-2 my-4 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 italic rounded-r" {...props} />,
-        ul: ({ node, ...props }) => <ul className="list-disc list-outside ml-5 space-y-1 marker:text-indigo-500" {...props} />,
-        ol: ({ node, ...props }) => <ol className="list-decimal list-outside ml-5 space-y-1 marker:text-indigo-500" {...props} />,
+        ul: ({ node, ...props }) => <ul className="list-disc list-outside ml-5 space-y-1 mb-4 marker:text-indigo-500" {...props} />,
+        ol: ({ node, ...props }) => <ol className="list-decimal list-outside ml-5 space-y-1 mb-4 marker:text-indigo-500" {...props} />,
         li: ({ node, ...props }) => <li className="pl-1 text-slate-700 dark:text-slate-300" {...props} />,
         a: ({ node, href, children, ...props }) => {
             return <a href={href} className="text-indigo-600 dark:text-indigo-400 hover:underline decoration-2 font-medium inline-flex items-center gap-0.5" {...props}><LinkIcon size={12} />{children}</a>
@@ -158,7 +159,7 @@ const Preview = ({
                 <div className={`prose dark:prose-invert max-w-none ${sizeClass}`}>
                     <ReactMarkdown
                         remarkPlugins={[remarkMath]}
-                        rehypePlugins={[rehypeKatex]}
+                        rehypePlugins={[rehypeKatex, rehypeRaw]}
                         components={customComponents}
                         urlTransform={(url) => {
                             if (url.startsWith('wiki:')) return url;

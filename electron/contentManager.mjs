@@ -22,6 +22,10 @@ class ContentManager {
         this.contentPath = contentPath;
         console.log(`[ContentManager] Initializing with path: ${this.contentPath}`);
 
+        // Reset state to prevent pollution from previous content location
+        this.config = {};
+        this.index = [];
+
         // 1. Initial Scan
         await this.scan();
 
@@ -45,6 +49,9 @@ class ContentManager {
                 } catch (e) {
                     console.error('[ContentManager] Failed to read _config.json:', e);
                 }
+            } else {
+                // Reset config if file doesn't exist (important for switching to empty folders)
+                this.config = {};
             }
 
             // Read meta
@@ -127,7 +134,7 @@ class ContentManager {
                     sortIndex: safeData.sortIndex || 999,
                     fileName: fileName,
                     filePath: `content/${relativePath}`, // Keep relative for frontend compatibility
-                    content: body, // In-memory cache includes content? Yes for small wikis.
+                    content: content, // Use raw content (with frontmatter) so frontend can parse metadata
                     ...safeData
                 };
 
@@ -229,7 +236,7 @@ class ContentManager {
             console.log('[ContentManager] Sending update to frontend');
             this.mainWindow.webContents.send('content-updated', {
                 nodes: this.index,
-                config: this.config
+                config: this.config || {}
             });
         }
     }
