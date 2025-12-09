@@ -4,12 +4,20 @@ import { isElectron, writeFile } from '../utils/fileSystem';
 import { parseFrontmatter, stringifyFrontmatter } from '../utils/frontmatter';
 
 const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
-    const [body, setBody] = useState('');
-    const [metadata, setMetadata] = useState({
-        title: '',
-        date: new Date().toISOString().split('T')[0],
-        tags: '',
-        category: ''
+    const [body, setBody] = useState(() => parseFrontmatter(content || '').body);
+    const [metadata, setMetadata] = useState(() => {
+        const { metadata: parsedMeta } = parseFrontmatter(content || '');
+        return {
+            title: '',
+            date: new Date().toISOString().split('T')[0],
+            tags: '',
+            category: '',
+            ...parsedMeta,
+            title: parsedMeta.title || '',
+            date: parsedMeta.date || new Date().toISOString().split('T')[0],
+            tags: parsedMeta.tags || '',
+            category: parsedMeta.category || ''
+        };
     });
 
     const sizeClass = {
@@ -19,43 +27,73 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
         'xl': 'text-xl'
     }[fontSize || 'base'];
 
-    // Parse frontmatter on load or content change
-    useEffect(() => {
-        // Always parse, even if empty, to reset state
-        const { metadata: parsedMeta, body: parsedBody } = parseFrontmatter(content || '');
+    // Refs for tracking state without re-rendering and for logic checks
+    const isComposing = React.useRef(false);
+    const lastEmittedContent = React.useRef(content);
 
-        setMetadata(prev => ({
-            ...prev,
-            ...parsedMeta,
-            // Ensure defaults if missing in file
-            title: parsedMeta.title || prev.title || '',
-            date: parsedMeta.date || prev.date || new Date().toISOString().split('T')[0],
-            tags: parsedMeta.tags || prev.tags || '',
-            category: parsedMeta.category || prev.category || ''
-        }));
-        setBody(parsedBody);
+    // Initial load and external updates
+    useEffect(() => {
+        // Only update state if content is different from what we last emitted
+        // This prevents the "echo" loop where typing -> parent -> prop -> reset state
+        if (content !== lastEmittedContent.current) {
+            const { metadata: parsedMeta, body: parsedBody } = parseFrontmatter(content || '');
+
+            setBody(parsedBody);
+            setMetadata(prev => ({
+                ...prev,
+                ...parsedMeta,
+                title: parsedMeta.title || prev.title || '',
+                date: parsedMeta.date || prev.date || new Date().toISOString().split('T')[0],
+                tags: parsedMeta.tags || prev.tags || '',
+                category: parsedMeta.category || prev.category || ''
+            }));
+
+            // Sync ref so we don't re-emit this back to parent immediately if we triggered it
+            lastEmittedContent.current = content;
+        }
     }, [content]);
 
-    const isUserChange = React.useRef(false);
+    // Emit changes to parent
+    const emitChange = (newMeta, newBody) => {
+        // block updates if composing (IME)
+        if (isComposing.current) return;
 
-    // Sync changes to parent (Only if initiated by user)
-    useEffect(() => {
-        if (isUserChange.current && onChange) {
-            const fullContent = stringifyFrontmatter(metadata, body);
+        if (onChange) {
+            const fullContent = stringifyFrontmatter(newMeta, newBody);
+            lastEmittedContent.current = fullContent;
             onChange(fullContent);
-            isUserChange.current = false;
         }
-    }, [metadata, body, onChange]);
+    };
 
     // Helper to update state and notify parent
     const updateMetadata = (field, value) => {
-        isUserChange.current = true;
-        setMetadata(prev => ({ ...prev, [field]: value }));
+        const newMeta = { ...metadata, [field]: value };
+        setMetadata(newMeta);
+        emitChange(newMeta, body);
     };
 
     const updateBody = (value) => {
-        isUserChange.current = true;
         setBody(value);
+        emitChange(metadata, value);
+    };
+
+    const handleCompositionStart = () => {
+        isComposing.current = true;
+    };
+
+    const handleCompositionEnd = (e) => {
+        isComposing.current = false;
+        // Trigger a final update when composition ends
+        // e.target.value contains the final committed string
+        // We need to determine if this event came from metadata input or body textarea
+        const { name, value } = e.target;
+
+        if (name === 'note-body') {
+            updateBody(value);
+        } else if (name && name.startsWith('note-')) {
+            const field = name.replace('note-', '');
+            updateMetadata(field, value);
+        }
     };
 
     const handleSave = async () => {
@@ -90,6 +128,8 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
                     name="note-title"
                     value={metadata.title}
                     onChange={(e) => updateMetadata('title', e.target.value)}
+                    onCompositionStart={handleCompositionStart}
+                    onCompositionEnd={handleCompositionEnd}
                     placeholder="Untitled"
                     className="text-4xl font-bold w-full bg-transparent border-none focus:outline-none text-slate-900 dark:text-white placeholder-slate-300 dark:placeholder-slate-600"
                     autoComplete="off"
@@ -102,6 +142,8 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
                         name="note-slug"
                         value={metadata.slug || ''}
                         onChange={(e) => updateMetadata('slug', e.target.value)}
+                        onCompositionStart={handleCompositionStart}
+                        onCompositionEnd={handleCompositionEnd}
                         placeholder="my-custom-url"
                         className="bg-transparent border-none focus:outline-none text-slate-700 dark:text-slate-300 w-full font-mono text-xs"
                         autoComplete="off"
@@ -122,6 +164,8 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
                         name="note-tags"
                         value={metadata.tags}
                         onChange={(e) => updateMetadata('tags', e.target.value)}
+                        onCompositionStart={handleCompositionStart}
+                        onCompositionEnd={handleCompositionEnd}
                         placeholder="React, Bug, ..."
                         className="bg-transparent border-none focus:outline-none text-slate-700 dark:text-slate-300 w-full"
                         autoComplete="off"
@@ -133,6 +177,8 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
                         name="note-category"
                         value={metadata.category}
                         onChange={(e) => updateMetadata('category', e.target.value)}
+                        onCompositionStart={handleCompositionStart}
+                        onCompositionEnd={handleCompositionEnd}
                         placeholder="Dev"
                         className="bg-transparent border-none focus:outline-none text-slate-700 dark:text-slate-300 w-full"
                         autoComplete="off"
@@ -142,9 +188,12 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
 
             <div className="flex-1 overflow-hidden relative">
                 <textarea
+                    name="note-body"
                     className={`w-full h-full p-8 resize-none focus:outline-none bg-transparent text-slate-800 dark:text-slate-200 font-mono leading-relaxed ${sizeClass}`}
                     value={body}
                     onChange={(e) => updateBody(e.target.value)}
+                    onCompositionStart={handleCompositionStart}
+                    onCompositionEnd={handleCompositionEnd}
                     placeholder="Start writing..."
                     spellCheck="false"
                 />

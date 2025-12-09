@@ -455,7 +455,7 @@ export default function App() {
       }
     };
     loadContent();
-  }, [activeNoteId, notes]);
+  }, [activeNoteId]); // Removed notes to prevent race condition during save
 
   // Reset edit mode when navigating to a new note
   useEffect(() => {
