@@ -96,7 +96,7 @@ function createWindow() {
     Menu.setApplicationMenu(menu);
 
     if (isDev) {
-        win.loadURL('http://localhost:5173/'); // Vite dev server URL
+        win.loadURL('http://127.0.0.1:5173/'); // Vite dev server URL
         win.webContents.openDevTools();
     } else {
         win.loadFile(path.join(__dirname, '../dist/index.html'));

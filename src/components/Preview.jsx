@@ -69,10 +69,10 @@ const Preview = ({
             return <a href={href} className="text-indigo-600 dark:text-indigo-400 hover:underline decoration-2 font-medium inline-flex items-center gap-0.5" {...props}><LinkIcon size={12} />{children}</a>
         },
         img: ({ node, ...props }) => (
-            <div className="my-6 text-center">
+            <span className="my-6 text-center block">
                 <img className="rounded-lg shadow-sm max-w-full h-auto mx-auto border border-slate-200 dark:border-slate-800 inline-block" {...props} />
-                {props.alt && <p className="text-xs text-slate-500 mt-2">{props.alt}</p>}
-            </div>
+                {props.alt && <span className="text-xs text-slate-500 mt-2 block">{props.alt}</span>}
+            </span>
         ),
         p: ({ node, ...props }) => <p className="mb-4 leading-7 text-slate-700 dark:text-slate-300" {...props} />
     };
