@@ -121,6 +121,43 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
         }, 0);
     };
 
+    // Scroll Helper using Mirror Div
+    const scrollToMatch = (textarea, index) => {
+        if (!textarea) return;
+
+        const div = document.createElement('div');
+        const style = window.getComputedStyle(textarea);
+
+        // Copy styles
+        Array.from(style).forEach((prop) => {
+            div.style.setProperty(prop, style.getPropertyValue(prop), style.getPropertyPriority(prop));
+        });
+
+        div.style.position = 'absolute';
+        div.style.top = '-9999px';
+        div.style.left = '-9999px';
+        div.style.visibility = 'hidden';
+        div.style.height = 'auto';
+        div.style.overflow = 'hidden';
+
+        // Content up to match
+        const content = textarea.value.substring(0, index);
+        div.textContent = content;
+
+        // Handle trailing newline
+        if (content.endsWith('\n')) {
+            div.textContent += '\u200b'; // Zero-width space
+        }
+
+        document.body.appendChild(div);
+        const height = div.clientHeight;
+        document.body.removeChild(div);
+
+        // Scroll
+        // Center it: scrollTop = height - (textareaHeight / 2)
+        textarea.scrollTop = height - (textarea.clientHeight / 2);
+    };
+
     const performSearch = (direction = 'next') => {
         if (!searchQuery || !textareaRef.current) return;
 
@@ -149,18 +186,26 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
         if (index !== -1) {
             textarea.focus();
             textarea.setSelectionRange(index, index + query.length);
-
-            // Attempt to scroll into view
-            // Textarea scroll is tricky, simplistic approach:
-            const lineHeight = 24; // approx
-            const lines = body.substring(0, index).split('\n').length;
-            // This is a rough guess, native focus() usually handles basic scroll,
-            // but exact "center" positioning requires complex calculations.
-            // We rely on browser's focus behavior for now.
+            scrollToMatch(textarea, index);
         }
     };
 
     const handleTextareaKeyDown = (e) => {
+        // If search is open, intercept Enter keys for navigation
+        if (showSearch) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                performSearch(e.shiftKey ? 'prev' : 'next');
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                setShowSearch(false);
+                textareaRef.current?.focus(); // Re-focus textarea
+                return;
+            }
+        }
+
         if (e.metaKey || e.ctrlKey) {
             switch (e.key.toLowerCase()) {
                 case 'b':
@@ -219,7 +264,7 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
         <div className="h-full flex flex-col bg-white dark:bg-slate-900 relative">
             {/* Search Bar Overlay */}
             {showSearch && (
-                <div className="absolute top-4 right-8 z-10 flex items-center bg-white dark:bg-slate-800 shadow-xl rounded-lg border border-slate-200 dark:border-slate-700 p-1 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="absolute top-4 right-36 z-50 flex items-center bg-white dark:bg-slate-800 shadow-xl rounded-lg border border-slate-200 dark:border-slate-700 p-1 animate-in fade-in slide-in-from-top-2 duration-200">
                     <div className="flex items-center px-2 text-slate-400">
                         <Search size={14} />
                     </div>
