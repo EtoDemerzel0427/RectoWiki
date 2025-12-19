@@ -103,7 +103,9 @@ export default function App() {
     handleReorder,
     handleMove,
     wikiConfig,
-    saveConfig
+    saveConfig,
+    addToMeta,
+    removeFromMeta
   } = useFileSystem();
 
   const [activeNoteId, setActiveNoteId] = useState(null);
@@ -482,8 +484,17 @@ export default function App() {
 
       setFileContent(newContent);
 
-      // 2. Parse metadata to update title/tags in the sidebar immediately (Optimistic)
       const { metadata } = parseFrontmatter(newContent);
+      // Treat undefined as false (standard draft behavior)
+      const targetDraft = metadata.draft !== undefined ? metadata.draft : false;
+      const statusChanged = note && targetDraft !== note.draft;
+
+      // Handle metadata migration if draft status changed
+      if (statusChanged && isElectron()) {
+        const fileName = (note.fileName || note.title).replace('.md', '');
+        await removeFromMeta(note.parentId, fileName, note.draft);
+        await addToMeta(note.parentId, fileName, note.id, 'inside', targetDraft);
+      }
 
       setNotes(prev => prev.map(n => {
         if (n.id === activeNoteId) {
@@ -494,7 +505,8 @@ export default function App() {
             slug: metadata.slug || n.slug, // Update slug
             tags: metadata.tags || n.tags,
             category: metadata.category || n.category,
-            date: metadata.date || n.date
+            date: metadata.date || n.date,
+            draft: targetDraft
           };
         }
         return n;
@@ -530,8 +542,14 @@ export default function App() {
     }
   }, [darkMode]);
 
+  // Filter notes for non-electron (Web)
+  const filteredNotes = useMemo(() => {
+    if (isElectron()) return notes;
+    return notes.filter(n => !n.draft);
+  }, [notes]);
+
   // 构建树
-  const treeData = useMemo(() => buildTree(notes), [notes]);
+  const treeData = useMemo(() => buildTree(filteredNotes), [filteredNotes]);
 
   // 导航处理
   const handleNavigate = (identifier, isTitle = false) => {
@@ -564,7 +582,7 @@ export default function App() {
   const flatFilteredNotes = useMemo(() => {
     if (!searchQuery && !selectedTag) return null;
 
-    return notes.filter(note => {
+    return filteredNotes.filter(note => {
       if (note.isFolder) return false;
 
       const q = searchQuery.toLowerCase();
@@ -576,7 +594,7 @@ export default function App() {
 
       return matchesTag && matchesSearch;
     });
-  }, [searchQuery, selectedTag, notes]);
+  }, [searchQuery, selectedTag, filteredNotes]);
 
   const activeNote = notes.find(n => n.id === activeNoteId);
 

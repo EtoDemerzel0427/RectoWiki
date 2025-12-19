@@ -12,7 +12,8 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
             title: parsedMeta.title || '',
             date: parsedMeta.date || new Date().toISOString().split('T')[0],
             tags: parsedMeta.tags || '',
-            category: parsedMeta.category || ''
+            category: parsedMeta.category || '',
+            draft: parsedMeta.draft || false
         };
     });
 
@@ -45,7 +46,8 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
                 title: parsedMeta.title || prev.title || '',
                 date: parsedMeta.date || prev.date || new Date().toISOString().split('T')[0],
                 tags: parsedMeta.tags || prev.tags || '',
-                category: parsedMeta.category || prev.category || ''
+                category: parsedMeta.category || prev.category || '',
+                draft: parsedMeta.draft !== undefined ? parsedMeta.draft : prev.draft
             }));
 
             lastEmittedContent.current = content;
@@ -366,6 +368,20 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
                         className="bg-transparent border-none focus:outline-none text-slate-700 dark:text-slate-300 w-full"
                         autoComplete="off"
                     />
+
+                    <div className="text-slate-500 dark:text-slate-400 flex items-center">Draft</div>
+                    <div className="flex items-center">
+                        <input
+                            type="checkbox"
+                            name="note-draft"
+                            checked={!!metadata.draft}
+                            onChange={(e) => updateMetadata('draft', e.target.checked)}
+                            className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                        <span className="ml-2 text-xs text-slate-400">
+                            {metadata.draft ? 'Hidden on Web' : 'Public on Web'}
+                        </span>
+                    </div>
                 </div>
             </div>
 

@@ -188,6 +188,9 @@ const SortableTreeItem = ({ node, level = 0, activeNoteId, onSelect, expandedNod
                 </span>
 
                 <span className="truncate flex-1">{node.title}</span>
+                {node.draft && (
+                    <span className="px-1.5 py-0.5 text-[10px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded-sm leading-none uppercase tracking-tighter mr-1">Draft</span>
+                )}
 
                 {isElectron() && (
                     <button
@@ -501,8 +504,11 @@ const Sidebar = ({
                                         onClick={() => onNavigate(note.slug || note.id)}
                                         className="flex flex-col gap-1 px-3 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                                     >
-                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200 flex items-center gap-2">
                                             <Highlight text={note.title} query={searchQuery} />
+                                            {note.draft && (
+                                                <span className="px-1.5 py-0.5 text-[10px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded-sm leading-none uppercase tracking-tighter">Draft</span>
+                                            )}
                                         </span>
                                         <span className="text-xs text-slate-400 line-clamp-2">
                                             <Highlight text={getSearchSnippet(note.content, searchQuery)} query={searchQuery} />

@@ -27,6 +27,7 @@ dist_electron
 # Generated Content
 public/content.json
 content/content.json
+**/_draft_meta.json
 
 # Electron Builder
 release

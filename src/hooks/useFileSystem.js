@@ -91,6 +91,7 @@ slug: ${initialSlug}
 date: ${initialDate}
 tags: []
 category: ${initialCategory}
+draft: false
 ---
 
 `;
@@ -105,6 +106,7 @@ category: ${initialCategory}
                 category: initialCategory, // Simple category logic
                 tags: [],
                 date: initialDate,
+                draft: false,
                 content: fileContent,
                 parentId: parentId,
                 isFolder: false,
@@ -113,8 +115,8 @@ category: ${initialCategory}
 
             setNotes(prev => [...prev, newNote]);
 
-            // Update _meta.json in the specific directory
-            await updateMeta(parentId, sanitizedName); // Use title (no extension) for meta as per previous logic
+            // Update meta.json in the specific directory (Always public for new files initially)
+            await updateMeta(parentId, sanitizedName, false); // Use title (no extension) for meta as per previous logic
 
             // Trigger content regeneration
             await window.electronAPI.runGenerator();
@@ -178,8 +180,8 @@ category: ${initialCategory}
 
             setNotes(prev => prev.filter(n => n.id !== item.id));
 
-            // Update _meta.json
-            await removeFromMeta(item.parentId, item.fileName.replace('.md', ''));
+            // Update _meta.json or _draft_meta.json
+            await removeFromMeta(item.parentId, item.fileName.replace('.md', ''), item.draft);
 
             // Trigger content regeneration
             await window.electronAPI.runGenerator();
@@ -236,7 +238,8 @@ category: ${initialCategory}
             // We need to remove the old name and add the new name (without extension)
             // Ideally, we keep the position?
             // Let's try to replace it in place to preserve order.
-            const metaPath = `${parentPath}/_meta.json`;
+            const metaFile = item.draft ? '_draft_meta.json' : '_meta.json';
+            const metaPath = `${parentPath}/${metaFile}`;
             try {
                 const content = await readFile(metaPath);
                 let meta = JSON.parse(content);
@@ -249,7 +252,7 @@ category: ${initialCategory}
                     await writeFile(metaPath, JSON.stringify(meta, null, 2));
                 }
             } catch (e) {
-                console.warn("Failed to update _meta.json during rename", e);
+                console.warn(`Failed to update ${metaFile} during rename`, e);
             }
 
             // 3. Optimistic State Update
@@ -326,7 +329,8 @@ category: ${initialCategory}
         const metaNames = sortedSiblings.map(s => s.fileName.replace('.md', ''));
 
         const parentPath = item.parentId ? `content/${item.parentId}` : 'content';
-        const metaPath = `${parentPath}/_meta.json`;
+        const metaFile = item.draft ? '_draft_meta.json' : '_meta.json';
+        const metaPath = `${parentPath}/${metaFile}`;
 
         try {
             await writeFile(metaPath, JSON.stringify(metaNames, null, 2));
@@ -337,10 +341,11 @@ category: ${initialCategory}
         }
     };
 
-    // Helper to update _meta.json
-    const updateMeta = async (parentId, nameToAdd) => {
+    // Helper to update meta.json / _draft_meta.json
+    const updateMeta = async (parentId, nameToAdd, isDraft = false) => {
         const parentPath = parentId ? `content/${parentId}` : 'content';
-        const metaPath = `${parentPath}/_meta.json`;
+        const metaFile = isDraft ? '_draft_meta.json' : '_meta.json';
+        const metaPath = `${parentPath}/${metaFile}`;
 
         let meta = [];
         try {
@@ -380,9 +385,10 @@ category: ${initialCategory}
         }
     };
 
-    const removeFromMeta = async (parentId, nameToRemove) => {
+    const removeFromMeta = async (parentId, nameToRemove, isDraft = false) => {
         const parentPath = parentId ? `content/${parentId}` : 'content';
-        const metaPath = `${parentPath}/_meta.json`;
+        const metaFile = isDraft ? '_draft_meta.json' : '_meta.json';
+        const metaPath = `${parentPath}/${metaFile}`;
 
         try {
             const content = await readFile(metaPath);
@@ -447,8 +453,8 @@ category: ${initialCategory}
                 // Move file/dir
                 await renamePath(sourcePath, targetPath);
 
-                // Update _meta.json in source
-                await removeFromMeta(sourceParentId, movedNode.fileName.replace('.md', ''));
+                // Update meta in source
+                await removeFromMeta(sourceParentId, movedNode.fileName.replace('.md', ''), movedNode.draft);
 
                 // Update _meta.json in target
                 // If 'inside', append to end.
@@ -457,7 +463,7 @@ category: ${initialCategory}
                 // Wait, if sourceParentId !== targetParentId, and action is 'before'/'after',
                 // it means we dragged from Folder A to position X in Folder B.
 
-                await addToMeta(targetParentId, fileName.replace('.md', ''), targetItemId, action);
+                await addToMeta(targetParentId, fileName.replace('.md', ''), targetItemId, action, movedNode.draft);
 
                 // Update local state optimistically?
                 // It's complex to update paths for all children if it's a folder.
@@ -472,9 +478,10 @@ category: ${initialCategory}
                 // But targetNode would be the root object which has no fileName.
                 if (targetItemId === 'root') return;
 
-                // Only need to update _meta.json
+                // Only need to update meta
                 const parentPath = sourceParentId ? `content/${sourceParentId}` : 'content';
-                const metaPath = `${parentPath}/_meta.json`;
+                const metaFile = movedNode.draft ? '_draft_meta.json' : '_meta.json';
+                const metaPath = `${parentPath}/${metaFile}`;
 
                 let meta = [];
                 try {
@@ -521,9 +528,10 @@ category: ${initialCategory}
         }
     };
 
-    const addToMeta = async (parentId, nameToAdd, targetItemId, action) => {
+    const addToMeta = async (parentId, nameToAdd, targetItemId, action, isDraft = false) => {
         const parentPath = parentId ? `content/${parentId}` : 'content';
-        const metaPath = `${parentPath}/_meta.json`;
+        const metaFile = isDraft ? '_draft_meta.json' : '_meta.json';
+        const metaPath = `${parentPath}/${metaFile}`;
 
         let meta = [];
         try {
@@ -586,6 +594,8 @@ category: ${initialCategory}
         handleReorder,
         handleMove,
         wikiConfig,
-        saveConfig
+        saveConfig,
+        addToMeta,
+        removeFromMeta
     };
 };

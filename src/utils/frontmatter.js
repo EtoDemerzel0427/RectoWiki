@@ -36,6 +36,10 @@ export const parseFrontmatter = (content) => {
                 }
 
                 if (key) {
+                    // Type conversion
+                    if (value.toLowerCase() === 'true') value = true;
+                    else if (value.toLowerCase() === 'false') value = false;
+
                     metadata[key] = value;
                 }
             }

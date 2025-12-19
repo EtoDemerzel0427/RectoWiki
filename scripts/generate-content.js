@@ -47,6 +47,7 @@ export async function generateContent(customContentDir, customOutputFile) {
             category: data.category || segments[0] || 'General',
             tags: data.tags || [],
             date,
+            draft: data.draft || false,
             content: source, // Use full source to preserve frontmatter for web parser
             parentId: segments.length > 1 ? segments.slice(0, -1).join('/') : null,
             isFolder: false,
@@ -81,62 +82,64 @@ export async function generateContent(customContentDir, customOutputFile) {
     for (const dir of allDirs) {
         const dirPath = path.join(CONTENT_DIR, dir);
         const metaPath = path.join(dirPath, '_meta.json');
+        const draftMetaPath = path.join(dirPath, '_draft_meta.json');
 
         // Get items in this directory
-        const itemsInDir = nodes.filter(n => {
+        const allItemsInDir = nodes.filter(n => {
             if (dir === '.') return n.parentId === null;
             return n.parentId === dir;
         });
 
-        if (itemsInDir.length === 0) continue;
+        if (allItemsInDir.length === 0) continue;
 
-        let meta = [];
-        let hasChanges = false;
+        const publicNotes = allItemsInDir.filter(n => !n.draft);
+        const draftNotes = allItemsInDir.filter(n => n.draft);
 
-        // Read existing _meta.json
-        if (fs.existsSync(metaPath)) {
-            try {
-                meta = fs.readJSONSync(metaPath);
-            } catch (e) {
-                console.warn(`Failed to read ${metaPath}, creating new one.`);
+        // Helper to sync meta files
+        const syncMeta = (notes, filePath, autoCreate = true) => {
+            let meta = [];
+            let hasChanges = false;
+            const exists = fs.existsSync(filePath);
+
+            if (exists) {
+                try {
+                    meta = fs.readJSONSync(filePath);
+                } catch (e) {
+                    console.warn(`Failed to read ${filePath}`);
+                }
             }
-        }
 
-        // Get current filenames/foldernames
-        const currentNames = itemsInDir.map(n => n.fileName || (n.isFolder ? n.title : n.id.split('/').pop() + '.md'));
+            const currentNames = notes.map(n => (n.fileName || n.title).replace(/\.md$/, ''));
 
-        // Append new items to meta
-        currentNames.forEach(name => {
-            // Check if name (or name without extension for files) is in meta
-            // Actually, let's store exact filenames/foldernames in meta for precision
-            // But user might prefer "Schrodinger" over "Schrodinger.md"
-            // Let's stick to simple names: "Schrodinger" for Schrodinger.md, "Physics" for Physics folder
+            currentNames.forEach(name => {
+                if (!meta.includes(name)) {
+                    meta.push(name);
+                    hasChanges = true;
+                }
+            });
 
-            const simpleName = name.replace(/\.md$/, '');
-            if (!meta.includes(simpleName)) {
-                meta.push(simpleName);
-                hasChanges = true;
+            if (hasChanges || (!exists && autoCreate && notes.length > 0)) {
+                if (!exists) meta.sort((a, b) => a.localeCompare(b));
+                fs.outputJSONSync(filePath, meta, { spaces: 2 });
+                console.log(`Updated ${filePath}`);
             }
-        });
+            return meta;
+        };
 
-        // Write back if changed or new
-        if (hasChanges || !fs.existsSync(metaPath)) {
-            // Sort only if creating new (optional, but good for initial state)
-            if (!fs.existsSync(metaPath)) {
-                meta.sort((a, b) => {
-                    // Folders first? Or alphabetical? Let's do alphabetical for now
-                    return a.localeCompare(b);
-                });
-            }
-            fs.outputJSONSync(metaPath, meta, { spaces: 2 });
-            console.log(`Updated ${metaPath}`);
-        }
+        // Sync both meta files
+        const publicMeta = syncMeta(publicNotes, metaPath, true);
+        const draftMeta = syncMeta(draftNotes, draftMetaPath, true);
 
         // Assign sortIndex to nodes
-        itemsInDir.forEach(node => {
+        allItemsInDir.forEach(node => {
             const simpleName = (node.fileName || node.title).replace(/\.md$/, '');
-            const index = meta.indexOf(simpleName);
-            node.sortIndex = index !== -1 ? index : 9999;
+            if (node.draft) {
+                const index = draftMeta.indexOf(simpleName);
+                node.sortIndex = index !== -1 ? 10000 + index : 20000;
+            } else {
+                const index = publicMeta.indexOf(simpleName);
+                node.sortIndex = index !== -1 ? index : 9999;
+            }
         });
     }
 
