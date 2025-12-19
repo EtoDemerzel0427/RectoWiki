@@ -37,6 +37,21 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { isElectron } from '../utils/fileSystem';
+import { stripMarkdown, getSearchSnippet } from '../utils/markdownUtils';
+
+const Highlight = ({ text, query }) => {
+    if (!query) return <span>{text}</span>;
+    const parts = text.split(new RegExp(`(${query.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')})`, 'gi'));
+    return (
+        <span>
+            {parts.map((part, i) =>
+                part.toLowerCase() === query.toLowerCase()
+                    ? <span key={i} className="text-violet-600 bg-violet-50 dark:bg-violet-900/30 font-bold px-0.5 rounded-sm">{part}</span>
+                    : part
+            )}
+        </span>
+    );
+};
 
 const ContextMenu = ({ x, y, onClose, onAction, item, isFirst, isLast }) => {
     if (!item) return null;
@@ -486,8 +501,12 @@ const Sidebar = ({
                                         onClick={() => onNavigate(note.slug || note.id)}
                                         className="flex flex-col gap-1 px-3 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                                     >
-                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{note.title}</span>
-                                        <span className="text-xs text-slate-400 truncate">{note.content.substring(0, 40)}...</span>
+                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                                            <Highlight text={note.title} query={searchQuery} />
+                                        </span>
+                                        <span className="text-xs text-slate-400 line-clamp-2">
+                                            <Highlight text={getSearchSnippet(note.content, searchQuery)} query={searchQuery} />
+                                        </span>
                                     </div>
                                 ))
                             ) : (

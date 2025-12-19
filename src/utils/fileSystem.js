@@ -2,6 +2,14 @@ export const isElectron = () => {
     return window.electronAPI !== undefined;
 };
 
+/**
+ * Sanitizes a filename by replacing OS-forbidden characters with hyphens.
+ */
+export const sanitizeFilename = (name) => {
+    if (!name) return '';
+    return name.replace(/[\\/:*?"<>|]/g, '-').trim();
+};
+
 export const readFile = async (filePath) => {
     if (isElectron()) {
         const result = await window.electronAPI.readFile(filePath);

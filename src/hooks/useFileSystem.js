@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { isElectron, readFile, writeFile, createFile, deleteFile, createDir, renamePath } from '../utils/fileSystem';
+import { isElectron, readFile, writeFile, createFile, deleteFile, createDir, renamePath, sanitizeFilename } from '../utils/fileSystem';
 import { parseFrontmatter, stringifyFrontmatter } from '../utils/frontmatter';
 
 export const useFileSystem = () => {
@@ -66,7 +66,9 @@ export const useFileSystem = () => {
     const handleCreateFile = async (name, parentId = null) => {
         if (!isElectron() || !name) return;
 
-        const fileName = name.endsWith('.md') ? name : `${name}.md`;
+        const rawName = name.replace(/\.md$/, '');
+        const sanitizedName = sanitizeFilename(rawName);
+        const fileName = `${sanitizedName}.md`;
         // Construct path based on parentId
         const parentPath = parentId ? `content/${parentId}` : 'content';
         const filePath = `${parentPath}/${fileName}`;
@@ -75,7 +77,7 @@ export const useFileSystem = () => {
             // Create file with YAML frontmatter
             // User requested: Input name = filename. Page title = YAML title (initially same as filename or empty).
             // We'll set initial YAML title to filename for convenience, but it can be changed independently.
-            const initialTitle = name.replace('.md', '');
+            const initialTitle = rawName;
             const initialSlug = initialTitle.toLowerCase()
                 .replace(/[^\w\s-]/g, '') // Remove non-word chars (except space and hyphen)
                 .replace(/\s+/g, '-')     // Replace spaces with hyphens
@@ -96,7 +98,7 @@ category: ${initialCategory}
 
             // Update local state
             const newNote = {
-                id: parentId ? `${parentId}/${name.replace('.md', '')}` : name.replace('.md', ''),
+                id: parentId ? `${parentId}/${sanitizedName}` : sanitizedName,
                 title: initialTitle,
                 slug: initialSlug,
                 filePath: `${parentPath}/${fileName}`, // Add filePath
@@ -112,7 +114,7 @@ category: ${initialCategory}
             setNotes(prev => [...prev, newNote]);
 
             // Update _meta.json in the specific directory
-            await updateMeta(parentId, newNote.title); // Use title (no extension) for meta as per previous logic
+            await updateMeta(parentId, sanitizedName); // Use title (no extension) for meta as per previous logic
 
             // Trigger content regeneration
             await window.electronAPI.runGenerator();
@@ -125,23 +127,24 @@ category: ${initialCategory}
     const handleCreateDir = async (name, parentId = null) => {
         if (!isElectron() || !name) return;
 
+        const sanitizedName = sanitizeFilename(name);
         const parentPath = parentId ? `content/${parentId}` : 'content';
-        const dirPath = `${parentPath}/${name}`;
+        const dirPath = `${parentPath}/${sanitizedName}`;
 
         try {
             await createDir(dirPath);
 
             const newFolder = {
-                id: parentId ? `${parentId}/${name}` : name,
+                id: parentId ? `${parentId}/${sanitizedName}` : sanitizedName,
                 title: name,
                 category: parentId ? parentId.split('/')[0] : 'System',
                 parentId: parentId,
                 isFolder: true,
                 children: [],
-                fileName: name
+                fileName: sanitizedName
             };
             setNotes(prev => [...prev, newFolder]);
-            await updateMeta(parentId, name);
+            await updateMeta(parentId, sanitizedName);
 
         } catch (error) {
             alert("Failed to create folder: " + error.message);
@@ -193,10 +196,13 @@ category: ${initialCategory}
             const parentPath = item.parentId ? `content/${item.parentId}` : 'content';
             const oldFileName = item.fileName;
 
+            const rawNewName = newName.replace(/\.md$/, '');
+            const sanitizedNewName = sanitizeFilename(rawNewName);
+
             // Determine new filename
-            let newFileName = newName;
-            if (!item.isFolder && !newName.endsWith('.md')) {
-                newFileName = `${newName}.md`;
+            let newFileName = sanitizedNewName;
+            if (!item.isFolder) {
+                newFileName = `${sanitizedNewName}.md`;
             }
 
             const oldPath = `${parentPath}/${oldFileName}`;
@@ -212,7 +218,7 @@ category: ${initialCategory}
 
                     const newMetadata = {
                         ...metadata,
-                        title: newName.replace('.md', ''),
+                        title: rawNewName,
                         slug: newSlug
                     };
 
@@ -248,15 +254,15 @@ category: ${initialCategory}
 
             // 3. Optimistic State Update
             // We need to update the notes array immediately so the UI doesn't try to access the old file
-            const newId = item.parentId ? `${item.parentId}/${newName.replace('.md', '')}` : newName.replace('.md', '');
-            const newSlug = newName.replace('.md', '').toLowerCase().replace(/\s+/g, '-');
+            const newId = item.parentId ? `${item.parentId}/${sanitizedNewName}` : sanitizedNewName;
+            const newSlug = rawNewName.toLowerCase().replace(/\s+/g, '-');
 
             setNotes(prev => prev.map(n => {
                 if (n.id === item.id) {
                     return {
                         ...n,
                         id: newId,
-                        title: newName.replace('.md', ''),
+                        title: rawNewName,
                         slug: newSlug,
                         fileName: newFileName,
                         filePath: `${parentPath}/${newFileName}`
