@@ -216,6 +216,7 @@ export default function App() {
   const [settingsTitle, setSettingsTitle] = useState('');
   const [settingsFontTheme, setSettingsFontTheme] = useState('');
   const [settingsFontSize, setSettingsFontSize] = useState('base');
+  const [settingsHomePageId, setSettingsHomePageId] = useState('');
 
   // Page Appearance State
   const [isPageAppearanceOpen, setIsPageAppearanceOpen] = useState(false);
@@ -227,6 +228,7 @@ export default function App() {
       setSettingsTitle(wikiConfig.title || '');
       setSettingsFontTheme(wikiConfig.fontTheme || '');
       setSettingsFontSize(wikiConfig.fontSize || 'base');
+      setSettingsHomePageId(wikiConfig.homePageId || '');
       // Update document title
       if (wikiConfig.title) document.title = wikiConfig.title;
     }
@@ -377,7 +379,48 @@ export default function App() {
     }
 
     if (!targetNote) {
-      targetNote = notes.find(n => n.id === 'Meta/About') || notes.find(n => !n.isFolder);
+      // 1. Check Config
+      if (wikiConfig && wikiConfig.homePageId) {
+        targetNote = notes.find(n => n.id === wikiConfig.homePageId);
+      }
+
+      // 2. Fallback to Meta/About if config invalid or missing
+      if (!targetNote) {
+        targetNote = notes.find(n => n.id === 'Meta/About');
+      }
+
+      // 3. Fallback to visually first note
+      if (!targetNote) {
+        // Fallback: Find the first visual leaf node from the sorted tree
+        // Note: We need to use 'treeData', but it's defined below and depends on notes.
+        // To avoid circular dependencies or massive refactoring, we can locally rebuild a minimal tree 
+        // or just accept that we need to rely on filteredNotes if available, but filteredNotes depends on activeNoteId/search.
+        // Actually, 'notes' has 'sortIndex'. We can just find the global first item by sorting root items?
+        // No, structure matters.
+        // Let's implement a quick helper to find the first leaf based on sortIndex + parent/child relationship.
+
+        const findFirstLeaf = (items) => {
+          // Build temporary tree for finding first
+          // Only need root items first
+          const roots = items.filter(n => !n.parentId).sort((a, b) => (a.sortIndex || 9999) - (b.sortIndex || 9999));
+
+          const findFirstIn = (nodes) => {
+            for (const node of nodes) {
+              if (!node.isFolder) return node;
+              // Find children of this folder
+              const children = items.filter(n => n.parentId === node.id).sort((a, b) => (a.sortIndex || 9999) - (b.sortIndex || 9999));
+              if (children.length > 0) {
+                const found = findFirstIn(children);
+                if (found) return found;
+              }
+            }
+            return null;
+          };
+          return findFirstIn(roots);
+        };
+
+        targetNote = findFirstLeaf(notes);
+      }
     }
 
     if (targetNote) {
@@ -878,7 +921,8 @@ export default function App() {
           await saveConfig({
             title: settingsTitle,
             fontTheme: settingsFontTheme,
-            fontSize: settingsFontSize
+            fontSize: settingsFontSize,
+            homePageId: settingsHomePageId
           });
 
           if (isElectron() && window.electronAPI?.saveSettings) {
@@ -936,6 +980,27 @@ export default function App() {
               <option value="base">Normal</option>
               <option value="lg">Large</option>
               <option value="xl">Extra Large</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Homepage
+            </label>
+            <select
+              value={settingsHomePageId}
+              onChange={(e) => setSettingsHomePageId(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">Default (Auto-detected)</option>
+              {notes
+                .filter(n => !n.isFolder && !n.draft)
+                .sort((a, b) => (a.title || a.fileName).localeCompare(b.title || b.fileName))
+                .map(n => (
+                  <option key={n.id} value={n.id}>
+                    {n.title || n.fileName}
+                  </option>
+                ))}
             </select>
           </div>
 
