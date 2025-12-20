@@ -68,7 +68,7 @@ const AbcRenderer = ({ content }) => {
 
     return (
         <div className="my-6 p-4 bg-white dark:bg-slate-800 rounded-lg overflow-x-auto shadow-sm border border-slate-200 dark:border-slate-700">
-            <div ref={visualRef} />
+            <div ref={visualRef} className="abcjs-visual-container" />
             <div ref={audioRef} className="mt-4" />
         </div>
     );

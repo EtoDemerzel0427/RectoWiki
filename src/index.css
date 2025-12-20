@@ -222,17 +222,20 @@ kbd {
   height: 40px !important;
   max-width: 100% !important;
   box-sizing: border-box !important;
-  background-color: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background-color: #f8fafc !important;
+  /* Force light background */
+  border: 1px solid #e2e8f0 !important;
   border-radius: 0.5rem;
   padding: 0 8px !important;
   margin-top: 1rem;
+  color: #334155 !important;
+  /* Force dark text/icons in light mode */
 }
 
 .dark .abcjs-inline-audio {
-  background-color: #1e293b;
-  border-color: #334155;
-  color: #f1f5f9;
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #f1f5f9 !important;
 }
 
 /* Audio Controls (Buttons) */
@@ -278,8 +281,16 @@ kbd {
   margin: auto !important;
 }
 
+/* Force specific target on 'g' to override abcjs default white color */
+.abcjs-inline-audio .abcjs-btn g {
+  fill: #334155 !important;
+  /* Explicit dark color for light mode */
+  stroke: none !important;
+}
+
 .dark .abcjs-inline-audio .abcjs-btn g {
   fill: #cbd5e1 !important;
+  /* Explicit light color for dark mode */
 }
 
 /* Progress Bar */
@@ -317,6 +328,8 @@ kbd {
   margin-left: 8px !important;
   white-space: nowrap !important;
   line-height: normal !important;
+  color: #334155 !important;
+  /* Explicit color */
 }
 
 .dark .abcjs-clock-label {
@@ -327,4 +340,26 @@ kbd {
 .abcjs-tempo-wrapper,
 .abcjs-css-warning {
   display: none !important;
+}
+
+/* 
+  AbcJs Visual Notation Dark Mode 
+  Invert colors for notes, staff, and text to be visible on dark backgrounds.
+*/
+.dark .abcjs-visual-container svg {
+  overflow: visible;
+  /* Ensure nothing gets clipped if we mess with sizes */
+}
+
+.dark .abcjs-visual-container svg path {
+  fill: #cbd5e1 !important;
+}
+
+.dark .abcjs-visual-container svg text {
+  fill: #cbd5e1 !important;
+}
+
+/* Ensure staff lines (stroked paths) are also colored */
+.dark .abcjs-visual-container svg path[stroke] {
+  stroke: #cbd5e1 !important;
 }
