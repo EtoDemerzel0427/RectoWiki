@@ -13,6 +13,66 @@ import {
     Tag,
     Link as LinkIcon
 } from 'lucide-react';
+import abcjs from 'abcjs';
+import 'abcjs/abcjs-audio.css';
+import { useRef, useEffect } from 'react';
+
+const AbcRenderer = ({ content }) => {
+    const visualRef = useRef(null);
+    const audioRef = useRef(null);
+
+    useEffect(() => {
+        if (!visualRef.current) return;
+
+        // Render visual
+        const visualObj = abcjs.renderAbc(visualRef.current, content, {
+            responsive: 'resize',
+            add_classes: true,
+            paddingtop: 0,
+            paddingbottom: 0,
+            paddingright: 0,
+            paddingleft: 0,
+        });
+
+        // Initialize audio if supported and visual render succeeded
+        if (abcjs.synth.supportsAudio() && visualObj && visualObj[0]) {
+            const synthControl = new abcjs.synth.SynthController();
+
+            // We need to mount the control to the audioRef element
+            // abcjs might expect an ID string for some legacy reasons in older versions, 
+            // but newer versions support element. 
+            // If it fails we might need to generate unique IDs.
+            try {
+                synthControl.load(audioRef.current, null, {
+                    displayLoop: true,
+                    displayRestart: true,
+                    displayPlay: true,
+                    displayProgress: true,
+                    displayWarp: true
+                });
+
+                const createSynth = new abcjs.synth.CreateSynth();
+                // AudioContext handling is tricky, web browsers block it until user interaction.
+                // abcjs handles this by waiting for the play click.
+
+                createSynth.init({ visualObj: visualObj[0] }).then(() => {
+                    synthControl.setTune(visualObj[0], false, {
+                        chordsOff: false
+                    }).catch(console.warn);
+                }).catch(console.warn);
+            } catch (e) {
+                console.warn("Audio synth init failed", e);
+            }
+        }
+    }, [content]);
+
+    return (
+        <div className="my-6 p-4 bg-white dark:bg-slate-800 rounded-lg overflow-x-auto shadow-sm border border-slate-200 dark:border-slate-700">
+            <div ref={visualRef} />
+            <div ref={audioRef} className="mt-4" />
+        </div>
+    );
+};
 
 const Preview = ({
     content,
@@ -33,6 +93,9 @@ const Preview = ({
     const markdownComponents = {
         code({ node, inline, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || '');
+            if (!inline && match && match[1] === 'abc') {
+                return <AbcRenderer content={String(children).replace(/\n$/, '')} />;
+            }
             return !inline && match ? (
                 <div className="my-6 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-[#2d2d2d] shadow-sm group">
                     <div className="flex justify-between items-center px-4 py-1.5 bg-[#1f1f1f] border-b border-gray-700">
