@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef, useDeferredValue } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
@@ -15,26 +15,16 @@ import {
 } from 'lucide-react';
 import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
-import { useRef, useEffect } from 'react';
 
 const AbcRenderer = ({ content }) => {
     const visualRef = useRef(null);
     const audioRef = useRef(null);
-    const [debouncedContent, setDebouncedContent] = React.useState(content);
-
-    // Debounce content updates to prevent flickering on every keystroke
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            setDebouncedContent(content);
-        }, 300);
-        return () => clearTimeout(timer);
-    }, [content]);
 
     useEffect(() => {
         if (!visualRef.current) return;
 
         // Render visual
-        const visualObj = abcjs.renderAbc(visualRef.current, debouncedContent, {
+        const visualObj = abcjs.renderAbc(visualRef.current, content, {
             responsive: 'resize',
             add_classes: true,
             paddingtop: 0,
@@ -70,7 +60,7 @@ const AbcRenderer = ({ content }) => {
                 console.warn("Audio synth init failed", e);
             }
         }
-    }, [debouncedContent]); // Only re-render when debounced content changes
+    }, [content]);
 
     return (
         <div className="my-6 p-4 bg-white dark:bg-slate-800 rounded-lg overflow-x-auto shadow-sm border border-slate-200 dark:border-slate-700">
@@ -78,6 +68,54 @@ const AbcRenderer = ({ content }) => {
             <div ref={audioRef} className="mt-4" />
         </div>
     );
+};
+
+const staticMarkdownComponents = {
+    code({ node, inline, className, children, ...props }) {
+        const match = /language-(\w+)/.exec(className || '');
+        if (!inline && match && match[1] === 'abc') {
+            return <AbcRenderer content={String(children).replace(/\n$/, '')} />;
+        }
+        return !inline && match ? (
+            <div className="my-6 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-[#2d2d2d] shadow-sm group">
+                <div className="flex justify-between items-center px-4 py-1.5 bg-[#1f1f1f] border-b border-gray-700">
+                    <span className="text-xs font-mono text-gray-400">{match[1]}</span>
+                    <div className="flex gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
+                        <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></div>
+                        <div className="w-2.5 h-2.5 rounded-full bg-green-500/80"></div>
+                    </div>
+                </div>
+                <SyntaxHighlighter
+                    style={tomorrow}
+                    language={match[1]}
+                    PreTag="div"
+                    customStyle={{ margin: 0, padding: '1rem', background: 'transparent' }}
+                    {...props}
+                >
+                    {String(children).replace(/\n$/, '')}
+                </SyntaxHighlighter>
+            </div>
+        ) : (
+            <code className="bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded text-sm font-mono mx-1 border border-slate-200 dark:border-slate-700" {...props}>
+                {children}
+            </code>
+        );
+    },
+    h1: ({ node, ...props }) => <h1 className="text-3xl font-bold text-slate-900 dark:text-white mt-8 mb-4 pb-2 border-b border-slate-200 dark:border-slate-800" {...props} />,
+    h2: ({ node, ...props }) => <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-6 mb-3" {...props} />,
+    h3: ({ node, ...props }) => <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-5 mb-2" {...props} />,
+    blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-indigo-500 pl-4 py-2 my-4 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 italic rounded-r" {...props} />,
+    ul: ({ node, ...props }) => <ul className="list-disc list-outside ml-5 space-y-1 mb-4 marker:text-indigo-500" {...props} />,
+    ol: ({ node, ...props }) => <ol className="list-decimal list-outside ml-5 space-y-1 mb-4 marker:text-indigo-500" {...props} />,
+    li: ({ node, ...props }) => <li className="pl-1 text-slate-700 dark:text-slate-300" {...props} />,
+    img: ({ node, ...props }) => (
+        <span className="my-6 text-center block">
+            <img className="rounded-lg shadow-sm max-w-full h-auto mx-auto border border-slate-200 dark:border-slate-800 inline-block" {...props} />
+            {props.alt && <span className="text-xs text-slate-500 mt-2 block">{props.alt}</span>}
+        </span>
+    ),
+    p: ({ node, ...props }) => <p className="mb-4 leading-7 text-slate-700 dark:text-slate-300" {...props} />
 };
 
 const Preview = ({
@@ -89,66 +127,15 @@ const Preview = ({
     onTagClick,
     fontSize
 }) => {
-    // Pre-process content to handle [[WikiLinks]]
-    const processContent = (content) => {
-        if (!content) return '';
-        // Replace [[Title]] with [Title](wiki:Title) - encode the title for the URL
-        return content.replace(/\[\[(.*?)\]\]/g, (match, title) => `[${title}](wiki:${encodeURIComponent(title)})`);
-    };
+    // React 18+ Concurrency: useDeferredValue.
+    // This allows React to prioritize the input (Editor) while updating the Preview in the background
+    // as soon as CPU resources allow. It's smoother than a fixed timer debounce.
+    const debouncedContent = useDeferredValue(content);
 
-    const markdownComponents = {
-        code({ node, inline, className, children, ...props }) {
-            const match = /language-(\w+)/.exec(className || '');
-            if (!inline && match && match[1] === 'abc') {
-                return <AbcRenderer content={String(children).replace(/\n$/, '')} />;
-            }
-            return !inline && match ? (
-                <div className="my-6 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-[#2d2d2d] shadow-sm group">
-                    <div className="flex justify-between items-center px-4 py-1.5 bg-[#1f1f1f] border-b border-gray-700">
-                        <span className="text-xs font-mono text-gray-400">{match[1]}</span>
-                        <div className="flex gap-1.5">
-                            <div className="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
-                            <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></div>
-                            <div className="w-2.5 h-2.5 rounded-full bg-green-500/80"></div>
-                        </div>
-                    </div>
-                    <SyntaxHighlighter
-                        style={tomorrow}
-                        language={match[1]}
-                        PreTag="div"
-                        customStyle={{ margin: 0, padding: '1rem', background: 'transparent' }}
-                        {...props}
-                    >
-                        {String(children).replace(/\n$/, '')}
-                    </SyntaxHighlighter>
-                </div>
-            ) : (
-                <code className="bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded text-sm font-mono mx-1 border border-slate-200 dark:border-slate-700" {...props}>
-                    {children}
-                </code>
-            );
-        },
-        h1: ({ node, ...props }) => <h1 className="text-3xl font-bold text-slate-900 dark:text-white mt-8 mb-4 pb-2 border-b border-slate-200 dark:border-slate-800" {...props} />,
-        h2: ({ node, ...props }) => <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-6 mb-3" {...props} />,
-        h3: ({ node, ...props }) => <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-5 mb-2" {...props} />,
-        blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-indigo-500 pl-4 py-2 my-4 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 italic rounded-r" {...props} />,
-        ul: ({ node, ...props }) => <ul className="list-disc list-outside ml-5 space-y-1 mb-4 marker:text-indigo-500" {...props} />,
-        ol: ({ node, ...props }) => <ol className="list-decimal list-outside ml-5 space-y-1 mb-4 marker:text-indigo-500" {...props} />,
-        li: ({ node, ...props }) => <li className="pl-1 text-slate-700 dark:text-slate-300" {...props} />,
-        a: ({ node, href, children, ...props }) => {
-            return <a href={href} className="text-indigo-600 dark:text-indigo-400 hover:underline decoration-2 font-medium inline-flex items-center gap-0.5" {...props}><LinkIcon size={12} />{children}</a>
-        },
-        img: ({ node, ...props }) => (
-            <span className="my-6 text-center block">
-                <img className="rounded-lg shadow-sm max-w-full h-auto mx-auto border border-slate-200 dark:border-slate-800 inline-block" {...props} />
-                {props.alt && <span className="text-xs text-slate-500 mt-2 block">{props.alt}</span>}
-            </span>
-        ),
-        p: ({ node, ...props }) => <p className="mb-4 leading-7 text-slate-700 dark:text-slate-300" {...props} />
-    };
-
-    const customComponents = {
-        ...markdownComponents,
+    // Memoize the components object to prevent unnecessary re-renders of ReactMarkdown's children
+    // causing flickering of heavy components like AbcRenderer.
+    const components = React.useMemo(() => ({
+        ...staticMarkdownComponents,
         a: ({ node, href, children, ...props }) => {
             if (href && href.startsWith('wiki:')) {
                 const title = href.replace('wiki:', '');
@@ -161,8 +148,15 @@ const Preview = ({
                     </span>
                 );
             }
-            return <a href={href} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:underline" {...props}>{children}</a>;
+            return <a href={href} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:underline decoration-2 font-medium inline-flex items-center gap-0.5" {...props}><LinkIcon size={12} />{children}</a>;
         }
+    }), [onNavigate]);
+
+    // Pre-process content to handle [[WikiLinks]]
+    const processContent = (content) => {
+        if (!content) return '';
+        // Replace [[Title]] with [Title](wiki:Title) - encode the title for the URL
+        return content.replace(/\[\[(.*?)\]\]/g, (match, title) => `[${title}](wiki:${encodeURIComponent(title)})`);
     };
 
     if (!activeNote) {
@@ -230,14 +224,14 @@ const Preview = ({
                     <ReactMarkdown
                         remarkPlugins={[remarkMath, remarkGfm]}
                         rehypePlugins={[rehypeKatex, rehypeRaw]}
-                        components={customComponents}
+                        components={components}
                         urlTransform={(url) => {
                             if (url.startsWith('wiki:')) return url;
                             return url;
                         }}
                     >
                         {/* Strip frontmatter for display */}
-                        {processContent(content ? content.replace(/^---\s*[\r\n]+[\s\S]*?[\r\n]+---\s*[\r\n]*/, '') : '')}
+                        {processContent(debouncedContent ? debouncedContent.replace(/^---\s*[\r\n]+[\s\S]*?[\r\n]+---\s*[\r\n]*/, '') : '')}
                     </ReactMarkdown>
                 </div>
             </div>
