@@ -20,12 +20,21 @@ import { useRef, useEffect } from 'react';
 const AbcRenderer = ({ content }) => {
     const visualRef = useRef(null);
     const audioRef = useRef(null);
+    const [debouncedContent, setDebouncedContent] = React.useState(content);
+
+    // Debounce content updates to prevent flickering on every keystroke
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedContent(content);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [content]);
 
     useEffect(() => {
         if (!visualRef.current) return;
 
         // Render visual
-        const visualObj = abcjs.renderAbc(visualRef.current, content, {
+        const visualObj = abcjs.renderAbc(visualRef.current, debouncedContent, {
             responsive: 'resize',
             add_classes: true,
             paddingtop: 0,
@@ -39,9 +48,6 @@ const AbcRenderer = ({ content }) => {
             const synthControl = new abcjs.synth.SynthController();
 
             // We need to mount the control to the audioRef element
-            // abcjs might expect an ID string for some legacy reasons in older versions, 
-            // but newer versions support element. 
-            // If it fails we might need to generate unique IDs.
             try {
                 synthControl.load(audioRef.current, null, {
                     displayLoop: true,
@@ -64,7 +70,7 @@ const AbcRenderer = ({ content }) => {
                 console.warn("Audio synth init failed", e);
             }
         }
-    }, [content]);
+    }, [debouncedContent]); // Only re-render when debounced content changes
 
     return (
         <div className="my-6 p-4 bg-white dark:bg-slate-800 rounded-lg overflow-x-auto shadow-sm border border-slate-200 dark:border-slate-700">

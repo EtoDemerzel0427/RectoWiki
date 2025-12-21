@@ -1,5 +1,6 @@
 {
   "title": "RectoWiki",
   "fontTheme": "theme-academic",
-  "fontSize": "base"
+  "fontSize": "base",
+  "homePageId": ""
 }
