@@ -363,3 +363,16 @@ kbd {
 .dark .abcjs-visual-container svg path[stroke] {
   stroke: #cbd5e1 !important;
 }
+
+/* Force standard font family for ABC text to match the rest of the app */
+.abcjs-visual-container svg text {
+  font-family: var(--font-body) !important;
+  font-style: normal !important;
+}
+
+/* Ensure title and specific elements also follow suit if they have specific overrides */
+.abcjs-title,
+.abcjs-composer,
+.abcjs-author {
+  font-family: var(--font-body) !important;
+}
