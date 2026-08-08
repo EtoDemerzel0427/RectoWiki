@@ -1,15 +1,25 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { promises: fsPromises } = fs;
+const {
+    atomicWriteFile,
+    createFileExclusive,
+    renameExclusive,
+    resolveContentPath,
+} = require('./fileAccess.cjs');
 
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
+const DEV_SERVER_URL = 'http://127.0.0.1:5173/';
+
+let mainWindow = null;
+let contentManager = null;
+let pendingSelectedContentPath = null;
 
 const loadSettings = () => {
     try {
         if (fs.existsSync(SETTINGS_FILE)) {
-            const data = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-            return JSON.parse(data);
+            return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
         }
     } catch (error) {
         console.error('Failed to load settings:', error);
@@ -19,15 +29,108 @@ const loadSettings = () => {
 
 const saveSettings = (settings) => {
     try {
+        fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
         fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
     } catch (error) {
         console.error('Failed to save settings:', error);
     }
 };
 
-function createWindow() {
-    const settings = loadSettings();
+const getDefaultContentPath = () => (
+    app.isPackaged
+        ? path.join(process.resourcesPath, 'content')
+        : path.join(__dirname, '../content')
+);
 
+const getConfiguredContentPath = () => loadSettings().contentPath || getDefaultContentPath();
+
+const isSafeExternalUrl = (url) => {
+    try {
+        const protocol = new URL(url).protocol;
+        return protocol === 'https:' || protocol === 'http:';
+    } catch {
+        return false;
+    }
+};
+
+const isSameApplicationPage = (currentUrl, targetUrl) => {
+    try {
+        const current = new URL(currentUrl);
+        const target = new URL(targetUrl);
+        return current.protocol === target.protocol
+            && current.host === target.host
+            && current.pathname === target.pathname;
+    } catch {
+        return false;
+    }
+};
+
+const configureNavigationSecurity = (win) => {
+    win.webContents.setWindowOpenHandler(({ url }) => {
+        if (isSafeExternalUrl(url)) {
+            void shell.openExternal(url);
+        }
+        return { action: 'deny' };
+    });
+
+    win.webContents.on('will-navigate', (event, url) => {
+        if (isSameApplicationPage(win.webContents.getURL(), url)) return;
+
+        event.preventDefault();
+        if (isSafeExternalUrl(url)) {
+            void shell.openExternal(url);
+        }
+    });
+};
+
+const buildApplicationMenu = (win) => Menu.buildFromTemplate([
+    {
+        label: 'File',
+        submenu: [
+            {
+                label: 'Auto Save',
+                type: 'checkbox',
+                checked: loadSettings().autoSave,
+                click: (menuItem) => {
+                    const settings = loadSettings();
+                    settings.autoSave = menuItem.checked;
+                    saveSettings(settings);
+                    win.webContents.send('auto-save-change', menuItem.checked);
+                },
+            },
+            { type: 'separator' },
+            { role: 'quit' },
+        ],
+    },
+    {
+        label: 'Edit',
+        submenu: [
+            { role: 'undo' },
+            { role: 'redo' },
+            { type: 'separator' },
+            { role: 'cut' },
+            { role: 'copy' },
+            { role: 'paste' },
+            { role: 'selectAll' },
+        ],
+    },
+    {
+        label: 'View',
+        submenu: [
+            { role: 'reload' },
+            { role: 'forceReload' },
+            { role: 'toggleDevTools' },
+            { type: 'separator' },
+            { role: 'resetZoom' },
+            { role: 'zoomIn' },
+            { role: 'zoomOut' },
+            { type: 'separator' },
+            { role: 'togglefullscreen' },
+        ],
+    },
+]);
+
+function createWindow() {
     const win = new BrowserWindow({
         width: 1200,
         height: 800,
@@ -35,147 +138,56 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.cjs'),
             nodeIntegration: false,
             contextIsolation: true,
+            sandbox: true,
         },
     });
 
-    const isDev = process.env.NODE_ENV === 'development';
+    configureNavigationSecurity(win);
+    Menu.setApplicationMenu(buildApplicationMenu(win));
 
-    if (isDev) {
-        process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
-    }
-
-    // Menu Template
-    const template = [
-        {
-            label: 'File',
-            submenu: [
-                {
-                    label: 'Auto Save',
-                    type: 'checkbox',
-                    checked: settings.autoSave,
-                    click: (menuItem) => {
-                        const newSettings = loadSettings();
-                        newSettings.autoSave = menuItem.checked;
-                        saveSettings(newSettings);
-                        win.webContents.send('auto-save-change', menuItem.checked);
-                    }
-                },
-                { type: 'separator' },
-                { role: 'quit' }
-            ]
-        },
-        {
-            label: 'Edit',
-            submenu: [
-                { role: 'undo' },
-                { role: 'redo' },
-                { type: 'separator' },
-                { role: 'cut' },
-                { role: 'copy' },
-                { role: 'paste' },
-                { role: 'selectAll' }
-            ]
-        },
-        {
-            label: 'View',
-            submenu: [
-                { role: 'reload' },
-                { role: 'forceReload' },
-                { role: 'toggleDevTools' },
-                { type: 'separator' },
-                { role: 'resetZoom' },
-                { role: 'zoomIn' },
-                { role: 'zoomOut' },
-                { type: 'separator' },
-                { role: 'togglefullscreen' }
-            ]
-        }
-    ];
-
-    const menu = Menu.buildFromTemplate(template);
-    Menu.setApplicationMenu(menu);
-
-    if (isDev) {
-        win.loadURL('http://127.0.0.1:5173/'); // Vite dev server URL
-        win.webContents.openDevTools();
-    } else {
-        win.loadFile(path.join(__dirname, '../dist/index.html'));
-    }
-
-    // Pipe renderer console logs to terminal
-    win.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    win.webContents.on('console-message', (_event, _level, message) => {
         console.log(`[Renderer] ${message}`);
     });
+
+    win.on('closed', () => {
+        if (mainWindow === win) mainWindow = null;
+    });
+
+    return win;
 }
 
-// Disable hardware acceleration to fix GPU crashes
-app.disableHardwareAcceleration();
-
-app.whenReady().then(async () => {
-    // Load settings
-    const settings = loadSettings();
-    let contentPath = path.join(__dirname, '../content'); // Default dev
-    if (app.isPackaged) {
-        contentPath = path.join(process.resourcesPath, 'content');
-        if (settings.contentPath) {
-            contentPath = settings.contentPath;
-        }
-    } else if (settings.contentPath) {
-        contentPath = settings.contentPath;
+async function loadApplication(win) {
+    if (process.env.NODE_ENV === 'development') {
+        await win.loadURL(DEV_SERVER_URL);
+        win.webContents.openDevTools();
+        return;
     }
 
-    const mainWindow = createWindow();
+    await win.loadFile(path.join(__dirname, '../dist/index.html'));
+}
 
-    // Initialize Content Manager
-    const { default: ContentManager } = await import('./contentManager.mjs');
-    let contentManager; // Declare contentManager here
-    contentManager = new ContentManager(mainWindow);
-    await contentManager.initialize(contentPath);
+const assertTrustedSender = (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) {
+        throw new Error('Rejected IPC request from an untrusted renderer');
+    }
 
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    });
+    if (event.senderFrame && event.senderFrame !== mainWindow.webContents.mainFrame) {
+        throw new Error('Rejected IPC request from a child frame');
+    }
+};
 
+const getRequestedPath = (requestPath) => {
+    if (!contentManager?.contentPath) {
+        throw new Error('Content manager is not initialized');
+    }
+    return resolveContentPath(contentManager.contentPath, requestPath);
+};
 
-    app.on('window-all-closed', () => {
-        if (process.platform !== 'darwin') {
-            app.quit();
-        }
-    });
-
-    // --- IPC Handlers ---
-
-    // --- IPC Handlers ---
-
-    // Helper to get absolute path
-    const getPath = (relativePath) => {
-        const settings = loadSettings();
-
-        // Handle custom content path
-        if (settings.contentPath) {
-            // If requesting content.json
-            if (relativePath === 'public/content.json') {
-                return path.join(settings.contentPath, 'content.json');
-            }
-            // If requesting a file in content/
-            if (relativePath.startsWith('content/')) {
-                const subPath = relativePath.replace(/^content\//, '');
-                return path.join(settings.contentPath, subPath);
-            }
-        }
-
-        if (app.isPackaged) {
-            // In production, resources are in process.resourcesPath
-            return path.join(process.resourcesPath, relativePath);
-        }
-        // In dev, relative to project root
-        return path.join(__dirname, '..', relativePath);
-    };
-
+const registerIpcHandlers = () => {
     ipcMain.handle('read-file', async (event, filePath) => {
         try {
-            const absolutePath = getPath(filePath);
-            const content = await fsPromises.readFile(absolutePath, 'utf-8');
+            assertTrustedSender(event);
+            const content = await fsPromises.readFile(getRequestedPath(filePath), 'utf8');
             return { success: true, content };
         } catch (error) {
             return { success: false, error: error.message };
@@ -184,10 +196,8 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('write-file', async (event, filePath, content) => {
         try {
-            const absolutePath = getPath(filePath);
-            // Ensure directory exists for the file
-            await fsPromises.mkdir(path.dirname(absolutePath), { recursive: true });
-            await fsPromises.writeFile(absolutePath, content, 'utf-8');
+            assertTrustedSender(event);
+            await atomicWriteFile(getRequestedPath(filePath), content);
             return { success: true };
         } catch (error) {
             console.error(`[Main] Write failed: ${error.message}`);
@@ -197,9 +207,8 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('create-file', async (event, filePath, content = '') => {
         try {
-            const absolutePath = getPath(filePath);
-            await fsPromises.mkdir(path.dirname(absolutePath), { recursive: true });
-            await fsPromises.writeFile(absolutePath, content, 'utf-8');
+            assertTrustedSender(event);
+            await createFileExclusive(getRequestedPath(filePath), content);
             return { success: true };
         } catch (error) {
             return { success: false, error: error.message };
@@ -208,9 +217,8 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('delete-file', async (event, filePath) => {
         try {
-            const absolutePath = getPath(filePath);
-            // Use rm with recursive: true to handle both files and directories
-            await fsPromises.rm(absolutePath, { recursive: true, force: true });
+            assertTrustedSender(event);
+            await fsPromises.rm(getRequestedPath(filePath), { recursive: true, force: false });
             return { success: true };
         } catch (error) {
             return { success: false, error: error.message };
@@ -219,8 +227,8 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('create-dir', async (event, dirPath) => {
         try {
-            const absolutePath = getPath(dirPath);
-            await fsPromises.mkdir(absolutePath, { recursive: true });
+            assertTrustedSender(event);
+            await fsPromises.mkdir(getRequestedPath(dirPath));
             return { success: true };
         } catch (error) {
             return { success: false, error: error.message };
@@ -229,90 +237,108 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('rename-path', async (event, oldPath, newPath) => {
         try {
-            const absoluteOldPath = getPath(oldPath);
-            const absoluteNewPath = getPath(newPath);
-            await fsPromises.rename(absoluteOldPath, absoluteNewPath);
+            assertTrustedSender(event);
+            await renameExclusive(getRequestedPath(oldPath), getRequestedPath(newPath));
             return { success: true };
         } catch (error) {
             return { success: false, error: error.message };
         }
     });
 
-    // We might need a way to get the project root path to the frontend so it knows where to look
-    ipcMain.handle('get-root-path', () => {
-        return path.resolve(__dirname, '..');
-    });
-
-    ipcMain.handle('run-generator', async () => {
-        // If ContentManager is active, use it for immediate consistency
-        if (contentManager) {
+    ipcMain.handle('run-generator', async (event) => {
+        try {
+            assertTrustedSender(event);
+            if (!contentManager) throw new Error('Content manager is not initialized');
             await contentManager.scan();
             return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
         }
-
-        return { success: false, error: "ContentManager not initialized" };
     });
 
-    ipcMain.handle('get-auto-save-status', () => {
-        const menu = Menu.getApplicationMenu();
-        if (!menu) return false;
-        const fileMenu = menu.items.find(item => item.label === 'File');
-        if (!fileMenu) return false;
-        const autoSave = fileMenu.submenu.items.find(item => item.label === 'Auto Save');
-        return autoSave ? autoSave.checked : false;
+    ipcMain.handle('get-auto-save-status', (event) => {
+        assertTrustedSender(event);
+        const fileMenu = Menu.getApplicationMenu()?.items.find((item) => item.label === 'File');
+        const autoSave = fileMenu?.submenu.items.find((item) => item.label === 'Auto Save');
+        return autoSave?.checked || false;
     });
 
-    // Settings IPCs
-    const { dialog } = require('electron');
+    ipcMain.handle('select-content-folder', async (event) => {
+        assertTrustedSender(event);
+        const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+        if (result.canceled || result.filePaths.length === 0) return null;
 
-    ipcMain.handle('select-content-folder', async () => {
-        const result = await dialog.showOpenDialog({
-            properties: ['openDirectory']
-        });
-        if (!result.canceled && result.filePaths.length > 0) {
-            return result.filePaths[0];
-        }
-        return null;
+        pendingSelectedContentPath = path.resolve(result.filePaths[0]);
+        return pendingSelectedContentPath;
     });
 
-    ipcMain.handle('get-settings', () => {
+    ipcMain.handle('get-settings', (event) => {
+        assertTrustedSender(event);
         return loadSettings();
     });
 
-    const getDefaultContentPath = () => {
-        if (app.isPackaged) {
-            return path.join(process.resourcesPath, 'content');
-        }
-        return path.join(__dirname, '../content');
-    };
-
     ipcMain.handle('save-settings', async (event, newSettings) => {
-        const currentSettings = loadSettings();
-        const mergedSettings = { ...currentSettings, ...newSettings };
-        saveSettings(mergedSettings);
+        assertTrustedSender(event);
 
-        // Determine target path
-        let targetPath = mergedSettings.contentPath;
-        if (!targetPath) {
-            targetPath = getDefaultContentPath();
+        const currentSettings = loadSettings();
+        const requestedPath = newSettings.contentPath
+            ? path.resolve(newSettings.contentPath)
+            : '';
+        const currentPath = currentSettings.contentPath
+            ? path.resolve(currentSettings.contentPath)
+            : '';
+
+        if (requestedPath !== currentPath && requestedPath !== pendingSelectedContentPath) {
+            throw new Error('Content folder must be selected through the folder picker');
         }
 
-        // Update Content Manager path if changed
-        if (contentManager) {
-            if (targetPath !== contentManager.contentPath) {
-                console.log(`[Main] Switching content path to: ${targetPath}`);
-                await contentManager.initialize(targetPath);
-            }
+        if (requestedPath) {
+            const stats = await fsPromises.stat(requestedPath);
+            if (!stats.isDirectory()) throw new Error('Selected content path is not a directory');
+        }
+
+        const mergedSettings = { ...currentSettings, ...newSettings, contentPath: requestedPath };
+        saveSettings(mergedSettings);
+        pendingSelectedContentPath = null;
+
+        const targetPath = requestedPath || getDefaultContentPath();
+        if (contentManager && targetPath !== contentManager.contentPath) {
+            await contentManager.initialize(targetPath);
         }
 
         return { success: true };
     });
 
-    ipcMain.handle('get-content', async () => {
-        if (contentManager) {
-            return contentManager.getContent();
-        }
-        return { nodes: [], config: {} };
+    ipcMain.handle('get-content', async (event) => {
+        assertTrustedSender(event);
+        return contentManager?.getContent() || { nodes: [], config: {} };
+    });
+};
+
+app.disableHardwareAcceleration();
+
+app.whenReady().then(async () => {
+    registerIpcHandlers();
+
+    const { default: ContentManager } = await import('./contentManager.mjs');
+    mainWindow = createWindow();
+    contentManager = new ContentManager(mainWindow);
+    await contentManager.initialize(getConfiguredContentPath());
+    await loadApplication(mainWindow);
+
+    app.on('activate', async () => {
+        if (BrowserWindow.getAllWindows().length > 0) return;
+
+        mainWindow = createWindow();
+        contentManager.mainWindow = mainWindow;
+        await loadApplication(mainWindow);
     });
 });
 
+app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+    void contentManager?.dispose();
+});

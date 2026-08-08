@@ -1,6 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import 'katex/dist/katex.min.css'; // Import KaTeX CSS
-
+import React, { useState, useMemo, useEffect, useEffectEvent } from 'react';
 import {
   Search,
   Menu,
@@ -136,23 +134,8 @@ export default function App() {
       setIsAutoSaveEnabled(enabled);
     });
 
-    return () => {
-      // Cleanup if needed (though onAutoSaveChange returns void currently, 
-      // we might want to implement removeListener in preload if strict cleanup is needed.
-      // For now, this is fine as App is root.)
-    };
+    return unsubscribe;
   }, []);
-
-  // Debounced Auto-Save
-  useEffect(() => {
-    if (!isAutoSaveEnabled || !activeNoteId || !isEditMode) return;
-
-    const timer = setTimeout(() => {
-      handleSaveContent(fileContent);
-    }, 1000); // 1 second debounce
-
-    return () => clearTimeout(timer);
-  }, [fileContent, isAutoSaveEnabled, activeNoteId, isEditMode]);
 
   // Split View Drag Handlers
   const handleSplitMouseDown = (e) => {
@@ -224,15 +207,16 @@ export default function App() {
   const [pageFontSize, setPageFontSize] = useState('');
 
   useEffect(() => {
-    if (wikiConfig) {
-      setSettingsTitle(wikiConfig.title || '');
-      setSettingsFontTheme(wikiConfig.fontTheme || '');
-      setSettingsFontSize(wikiConfig.fontSize || 'base');
-      setSettingsHomePageId(wikiConfig.homePageId || '');
-      // Update document title
-      if (wikiConfig.title) document.title = wikiConfig.title;
-    }
+    if (wikiConfig?.title) document.title = wikiConfig.title;
   }, [wikiConfig]);
+
+  const handleOpenSettings = () => {
+    setSettingsTitle(wikiConfig?.title || '');
+    setSettingsFontTheme(wikiConfig?.fontTheme || '');
+    setSettingsFontSize(wikiConfig?.fontSize || 'base');
+    setSettingsHomePageId(wikiConfig?.homePageId || '');
+    setIsSettingsOpen(true);
+  };
 
   // Content Path State (Electron only)
   const [contentPath, setContentPath] = useState('');
@@ -260,15 +244,10 @@ export default function App() {
     }
   };
 
-  // State for View Mode Metadata
-  const [viewMetadata, setViewMetadata] = useState({});
-  const [viewBody, setViewBody] = useState('');
-
-  useEffect(() => {
-    const { metadata, body } = parseFrontmatter(fileContent);
-    setViewMetadata(metadata);
-    setViewBody(body);
-  }, [fileContent]);
+  const viewMetadata = useMemo(
+    () => parseFrontmatter(fileContent).metadata,
+    [fileContent]
+  );
 
   const openModal = (type, item = null) => {
     let title = '';
@@ -424,6 +403,8 @@ export default function App() {
     }
 
     if (targetNote) {
+      // This effect resolves external URL/content state into the selected note.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveNoteId(targetNote.id);
       // Ensure hash matches
       if (targetNote.slug && hash !== targetNote.slug) {
@@ -448,7 +429,7 @@ export default function App() {
     // Expand root folders
     const rootFolders = notes.filter(n => !n.parentId && n.isFolder).map(n => n.id);
     setExpandedNodes(prev => [...new Set([...prev, ...rootFolders])]);
-  }, [loading, notes]); // Removed location.pathname dependency as we use hash now
+  }, [loading, notes, wikiConfig]); // Removed location.pathname dependency as we use hash now
 
   // Handle hash change
   useEffect(() => {
@@ -466,9 +447,11 @@ export default function App() {
 
   // Load content when activeNoteId changes
   useEffect(() => {
+    let cancelled = false;
+
     const loadContent = async () => {
       if (!activeNoteId) {
-        setFileContent(''); // Clear content if no active note
+        if (!cancelled) setFileContent('');
         return;
       }
 
@@ -486,26 +469,25 @@ export default function App() {
           }
 
           const content = await readFile(relativePath);
-          setFileContent(content);
+          if (!cancelled) setFileContent(content);
         } catch (error) {
           console.error("Failed to load file content:", error);
           // Fallback to what's in notes array if read fails?
           const note = notes.find(n => n.id === activeNoteId);
-          if (note) setFileContent(note.content);
+          if (!cancelled && note) setFileContent(note.content);
         }
       } else if (activeNoteId) {
         // Browser mode: use the content from content.json
         const note = notes.find(n => n.id === activeNoteId);
-        if (note) setFileContent(note.content);
+        if (!cancelled && note) setFileContent(note.content);
       }
     };
-    loadContent();
-  }, [activeNoteId]); // Removed notes to prevent race condition during save
+    void loadContent();
 
-  // Reset edit mode when navigating to a new note
-  useEffect(() => {
-    setIsEditMode(false);
-  }, [activeNoteId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeNoteId, notes]);
 
   const handleSaveContent = async (newContent) => {
     if (!activeNoteId) return;
@@ -574,6 +556,19 @@ export default function App() {
     }
   };
 
+  const saveContentForAutoSave = useEffectEvent(handleSaveContent);
+
+  // Debounce desktop auto-save so rapid edits become a single atomic write.
+  useEffect(() => {
+    if (!isAutoSaveEnabled || !activeNoteId || !isEditMode) return;
+
+    const timer = setTimeout(() => {
+      void saveContentForAutoSave(fileContent);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [fileContent, isAutoSaveEnabled, activeNoteId, isEditMode]);
+
 
 
   // Toggle Dark Mode
@@ -607,6 +602,7 @@ export default function App() {
     }
 
     if (target) {
+      setIsEditMode(false);
       setActiveNoteId(target.id);
       updateUrl(target.id);
       setIsMobileMenuOpen(false);
@@ -653,7 +649,7 @@ export default function App() {
       {/* Mobile Header */}
       <div className="md:hidden flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 z-20">
         <span className="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
-          <img src={`${import.meta.env.BASE_URL}logo.png`} alt="Logo" className="w-6 h-6" /> {wikiConfig?.title || "RectoWiki"}
+          <img src={`${import.meta.env.BASE_URL}logo.png`} alt="RectoWiki W logo" className="w-6 h-6" /> {wikiConfig?.title || "RectoWiki"}
         </span>
         <div className="flex gap-2">
           <button onClick={() => setDarkMode(!darkMode)} className="p-2 text-slate-600 dark:text-slate-400">
@@ -687,7 +683,7 @@ export default function App() {
         onReorder={handleReorder}
         onMove={handleMove}
         wikiTitle={wikiConfig?.title || "RectoWiki"}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={handleOpenSettings}
         isDesktopSidebarOpen={isDesktopSidebarOpen}
       />
 
@@ -738,9 +734,6 @@ export default function App() {
                     onSave={handleSaveContent}
                     onChange={(newContent) => {
                       setFileContent(newContent);
-                      const { metadata, body } = parseFrontmatter(newContent);
-                      setViewMetadata(metadata);
-                      setViewBody(body);
                     }}
                     fontSize={effectiveFontSize}
                   />
@@ -759,9 +752,6 @@ export default function App() {
                     onSave={handleSaveContent}
                     onChange={(newContent) => {
                       setFileContent(newContent);
-                      const { metadata, body } = parseFrontmatter(newContent);
-                      setViewMetadata(metadata);
-                      setViewBody(body);
                     }}
                     fontSize={effectiveFontSize}
                   />

@@ -1,0 +1,87 @@
+const path = require('path');
+const { randomUUID } = require('crypto');
+const { promises: fs } = require('fs');
+
+const CONTENT_PREFIX = 'content/';
+
+function getContentRelativePath(requestPath) {
+    if (typeof requestPath !== 'string' || requestPath.includes('\0')) {
+        throw new Error('Invalid content path');
+    }
+
+    if (requestPath === 'public/content.json') {
+        return 'content.json';
+    }
+
+    if (!requestPath.startsWith(CONTENT_PREFIX)) {
+        throw new Error('File access is limited to the content directory');
+    }
+
+    const relativePath = requestPath.slice(CONTENT_PREFIX.length);
+    if (!relativePath) {
+        throw new Error('The content root cannot be modified directly');
+    }
+
+    return relativePath;
+}
+
+function resolveContentPath(contentRoot, requestPath) {
+    const root = path.resolve(contentRoot);
+    const relativePath = getContentRelativePath(requestPath);
+
+    if (path.isAbsolute(relativePath)) {
+        throw new Error('Absolute paths are not allowed');
+    }
+
+    const resolvedPath = path.resolve(root, relativePath);
+    if (!resolvedPath.startsWith(`${root}${path.sep}`)) {
+        throw new Error('Path escapes the content directory');
+    }
+
+    return resolvedPath;
+}
+
+async function atomicWriteFile(filePath, content) {
+    const directory = path.dirname(filePath);
+    const temporaryPath = path.join(
+        directory,
+        `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`
+    );
+
+    await fs.mkdir(directory, { recursive: true });
+
+    try {
+        await fs.writeFile(temporaryPath, content, { encoding: 'utf8', flag: 'wx' });
+        await fs.rename(temporaryPath, filePath);
+    } catch (error) {
+        await fs.rm(temporaryPath, { force: true }).catch(() => {});
+        throw error;
+    }
+}
+
+async function createFileExclusive(filePath, content = '') {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, content, { encoding: 'utf8', flag: 'wx' });
+}
+
+async function renameExclusive(oldPath, newPath) {
+    if (oldPath === newPath) return;
+
+    try {
+        await fs.access(newPath);
+        const error = new Error(`Destination already exists: ${path.basename(newPath)}`);
+        error.code = 'EEXIST';
+        throw error;
+    } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+    }
+
+    await fs.rename(oldPath, newPath);
+}
+
+module.exports = {
+    atomicWriteFile,
+    createFileExclusive,
+    renameExclusive,
+    resolveContentPath,
+};

@@ -17,12 +17,8 @@ export const useFileSystem = () => {
                 // Reset to default if config is empty (crucial for location switching)
                 setWikiConfig(config && Object.keys(config).length > 0 ? config : { title: "RectoWiki" });
             } else {
-                const response = await fetch(`${import.meta.env.BASE_URL}content.json?t=${Date.now()}`, {
-                    cache: 'no-store',
-                    headers: {
-                        'Pragma': 'no-cache',
-                        'Cache-Control': 'no-cache'
-                    }
+                const response = await fetch(`${import.meta.env.BASE_URL}content.json`, {
+                    cache: 'no-cache'
                 });
                 if (!response.ok) throw new Error('Failed to load content');
                 const data = await response.json();
@@ -68,6 +64,10 @@ export const useFileSystem = () => {
 
         const rawName = name.replace(/\.md$/, '');
         const sanitizedName = sanitizeFilename(rawName);
+        if (!sanitizedName) {
+            alert('Please choose a valid file name.');
+            return;
+        }
         const fileName = `${sanitizedName}.md`;
         // Construct path based on parentId
         const parentPath = parentId ? `content/${parentId}` : 'content';
@@ -85,16 +85,14 @@ export const useFileSystem = () => {
             const initialCategory = parentId ? parentId.split('/')[0] : 'General';
             const initialDate = new Date().toISOString().split('T')[0];
 
-            const fileContent = `---
-title: ${initialTitle}
-slug: ${initialSlug}
-date: ${initialDate}
-tags: []
-category: ${initialCategory}
-draft: false
----
-
-`;
+            const fileContent = stringifyFrontmatter({
+                title: initialTitle,
+                slug: initialSlug,
+                date: initialDate,
+                tags: [],
+                category: initialCategory,
+                draft: false,
+            }, '');
             await createFile(filePath, fileContent);
 
             // Update local state
@@ -130,6 +128,10 @@ draft: false
         if (!isElectron() || !name) return;
 
         const sanitizedName = sanitizeFilename(name);
+        if (!sanitizedName) {
+            alert('Please choose a valid folder name.');
+            return;
+        }
         const parentPath = parentId ? `content/${parentId}` : 'content';
         const dirPath = `${parentPath}/${sanitizedName}`;
 
@@ -200,6 +202,10 @@ draft: false
 
             const rawNewName = newName.replace(/\.md$/, '');
             const sanitizedNewName = sanitizeFilename(rawNewName);
+            if (!sanitizedNewName) {
+                alert('Please choose a valid name.');
+                return null;
+            }
 
             // Determine new filename
             let newFileName = sanitizedNewName;
@@ -210,29 +216,29 @@ draft: false
             const oldPath = `${parentPath}/${oldFileName}`;
             const newPath = `${parentPath}/${newFileName}`;
 
-            // 0. Update YAML content (Title & Slug) before renaming
+            let renamedContent = null;
             if (!item.isFolder) {
-                try {
-                    const content = await readFile(oldPath);
-                    const { metadata, body } = parseFrontmatter(content);
-
-                    const newSlug = newName.replace('.md', '').toLowerCase().replace(/\s+/g, '-');
-
-                    const newMetadata = {
-                        ...metadata,
-                        title: rawNewName,
-                        slug: newSlug
-                    };
-
-                    const newContent = stringifyFrontmatter(newMetadata, body);
-                    await writeFile(oldPath, newContent);
-                } catch (e) {
-                    console.error("Failed to update YAML during rename", e);
-                }
+                const content = await readFile(oldPath);
+                const { metadata, body } = parseFrontmatter(content);
+                const newSlug = rawNewName.toLowerCase().replace(/\s+/g, '-');
+                renamedContent = stringifyFrontmatter({
+                    ...metadata,
+                    title: rawNewName,
+                    slug: newSlug,
+                }, body);
             }
 
             // 1. Rename on disk
             await renamePath(oldPath, newPath);
+
+            if (renamedContent !== null) {
+                try {
+                    await writeFile(newPath, renamedContent);
+                } catch (error) {
+                    await renamePath(newPath, oldPath).catch(() => {});
+                    throw error;
+                }
+            }
 
             // 2. Update _meta.json
             // We need to remove the old name and add the new name (without extension)
@@ -351,7 +357,7 @@ draft: false
         try {
             const content = await readFile(metaPath);
             meta = JSON.parse(content);
-        } catch (e) {
+        } catch {
             // File might not exist
         }
 
@@ -487,7 +493,7 @@ draft: false
                 try {
                     const content = await readFile(metaPath);
                     meta = JSON.parse(content);
-                } catch (e) {
+                } catch {
                     // Should exist if we are reordering
                 }
 
@@ -537,7 +543,7 @@ draft: false
         try {
             const content = await readFile(metaPath);
             meta = JSON.parse(content);
-        } catch (e) {
+        } catch {
             // Create if not exists
         }
 
@@ -551,14 +557,6 @@ draft: false
             // targetItemId is the full ID, we need the filename part for meta lookup
             // But wait, targetItemId might be 'Folder/Subfolder/File'. 
             // If we are in 'Folder/Subfolder', the meta contains 'File'.
-            const targetName = targetItemId.split('/').pop(); // This is a guess, safer to find node
-            // But we don't have node here easily without passing it.
-            // Let's rely on the fact that meta contains basenames.
-
-            // Actually, we should check if targetName exists in meta.
-            // If not, just push.
-
-            // Let's refine:
             // We need to find the index of the target item in the meta list.
             // The target item's name in meta is its basename (no extension).
 

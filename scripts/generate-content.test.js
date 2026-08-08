@@ -1,25 +1,23 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { generateContent } from './generate-content.js';
 import fs from 'fs-extra';
-import path from 'path';
 
 // Mock dependencies
 const mocks = vi.hoisted(() => ({
-    glob: vi.fn(),
-    matter: vi.fn()
+    glob: vi.fn()
 }));
 
 vi.mock('fs-extra');
 vi.mock('glob', () => ({
     glob: mocks.glob
 }));
-vi.mock('gray-matter', () => ({
-    default: mocks.matter
-}));
 
 describe('generateContent', () => {
     const mockContentDir = '/mock/content';
     const mockOutputFile = '/mock/public/content.json';
+    const queueScan = (files = [], directories = []) => {
+        mocks.glob.mockResolvedValueOnce(files).mockResolvedValueOnce(directories);
+    };
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -35,12 +33,9 @@ describe('generateContent', () => {
     });
 
     it('should generate content from markdown files', async () => {
-        mocks.glob.mockResolvedValue(['note1.md', 'folder/note2.md']);
+        queueScan(['note1.md', 'folder/note2.md']);
 
-        // Mock file content
-        mocks.matter.mockImplementation((content) => {
-            return { data: { title: 'Test Title' }, content: 'Test Content' };
-        });
+        fs.readFileSync.mockReturnValue('---\ntitle: Test Title\n---\nTest Content');
 
         await generateContent(mockContentDir, mockOutputFile);
 
@@ -61,7 +56,7 @@ describe('generateContent', () => {
     });
 
     it('should read _config.json', async () => {
-        mocks.glob.mockResolvedValue([]);
+        queueScan();
 
         fs.existsSync.mockImplementation((p) => p.endsWith('_config.json'));
         fs.readFileSync.mockImplementation((p) => {
@@ -76,9 +71,7 @@ describe('generateContent', () => {
     });
 
     it('should use _meta.json for sorting', async () => {
-        mocks.glob.mockResolvedValue(['a.md', 'b.md']);
-        mocks.matter.mockReturnValue({ data: {}, content: '' });
-
+        queueScan(['a.md', 'b.md']);
         // Mock _meta.json existence and content
         fs.existsSync.mockImplementation((p) => p.endsWith('_meta.json'));
         fs.readJSONSync.mockImplementation((p) => {

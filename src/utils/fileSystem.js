@@ -7,7 +7,12 @@ export const isElectron = () => {
  */
 export const sanitizeFilename = (name) => {
     if (!name) return '';
-    return name.replace(/[\\/:*?"<>|]/g, '-').trim();
+    const sanitized = name
+        .replace(/[\\/:*?"<>|]/g, '-')
+        .replace(/[. ]+$/g, '')
+        .trim();
+
+    return sanitized === '.' || sanitized === '..' ? '' : sanitized;
 };
 
 export const readFile = async (filePath) => {

@@ -1,7 +1,7 @@
 import fs from 'fs-extra';
 import path from 'path';
-import matter from 'gray-matter';
 import { glob } from 'glob';
+import { parseFrontmatter } from '../electron/frontmatter.mjs';
 
 export async function generateContent(customContentDir, customOutputFile) {
     const CONTENT_DIR = customContentDir || path.join(process.cwd(), 'content');
@@ -23,7 +23,7 @@ export async function generateContent(customContentDir, customOutputFile) {
     files.forEach((file) => {
         const filePath = path.join(CONTENT_DIR, file);
         const source = fs.readFileSync(filePath, 'utf8');
-        const { data, content } = matter(source);
+        const { metadata: data } = parseFrontmatter(source);
 
         // Normalize ID: replace backslashes, remove extension
         const id = file.replace(/\\/g, '/').replace(/\.md$/, '');
@@ -104,7 +104,7 @@ export async function generateContent(customContentDir, customOutputFile) {
             if (exists) {
                 try {
                     meta = fs.readJSONSync(filePath);
-                } catch (e) {
+                } catch {
                     console.warn(`Failed to read ${filePath}`);
                 }
             }

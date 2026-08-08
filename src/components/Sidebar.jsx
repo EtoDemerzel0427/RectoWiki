@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
     Search,
     Folder,
@@ -26,7 +26,6 @@ import {
     useSensor,
     useSensors,
     DragOverlay,
-    defaultDropAnimationSideEffects,
     useDroppable
 } from '@dnd-kit/core';
 import {
@@ -37,7 +36,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { isElectron } from '../utils/fileSystem';
-import { stripMarkdown, getSearchSnippet } from '../utils/markdownUtils';
+import { getSearchSnippet } from '../utils/markdownUtils';
 
 const Highlight = ({ text, query }) => {
     if (!query) return <span>{text}</span>;
@@ -53,7 +52,7 @@ const Highlight = ({ text, query }) => {
     );
 };
 
-const ContextMenu = ({ x, y, onClose, onAction, item, isFirst, isLast }) => {
+const ContextMenu = ({ x, y, onAction, item, isFirst, isLast }) => {
     if (!item) return null;
 
     if (!isElectron()) return null;
@@ -464,7 +463,7 @@ const Sidebar = ({
             <div className="min-w-[16rem] h-full flex flex-col">
                 <div className="p-5 hidden md:flex items-center justify-between border-b border-transparent">
                     <h1 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                        <img src={`${import.meta.env.BASE_URL}logo.png`} alt="Logo" className="w-8 h-8" />
+                        <img src={`${import.meta.env.BASE_URL}logo.png`} alt="RectoWiki W logo" className="w-8 h-8" />
                         {wikiTitle}
                     </h1>
                     <button onClick={() => setDarkMode(!darkMode)} className="p-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 transition-colors">
@@ -571,7 +570,6 @@ const Sidebar = ({
                         y={contextMenu.y}
                         item={contextMenu.item}
                         onAction={handleAction}
-                        onClose={() => setContextMenu(null)}
                     />
                 )}
 

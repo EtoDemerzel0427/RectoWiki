@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Save, Search, ChevronUp, ChevronDown, X } from 'lucide-react';
-import { isElectron, writeFile } from '../utils/fileSystem';
 import { parseFrontmatter, stringifyFrontmatter } from '../utils/frontmatter';
 
 const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
@@ -39,6 +38,8 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
         if (content !== lastEmittedContent.current) {
             const { metadata: parsedMeta, body: parsedBody } = parseFrontmatter(content || '');
 
+            // This controlled editor must resynchronize when another file is loaded.
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setBody(parsedBody);
             setMetadata(prev => ({
                 ...prev,
@@ -92,7 +93,7 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
         }
     };
 
-    const handleSave = async () => {
+    const handleSave = useCallback(async () => {
         try {
             const fullContent = stringifyFrontmatter(metadata, body);
             if (onSave) {
@@ -102,7 +103,7 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
             console.error("Error in handleSave:", e);
             alert("Error saving: " + e.message);
         }
-    };
+    }, [body, metadata, onSave]);
 
     // Text Formatting Logic
     const wrapSelection = (wrapper) => {
@@ -260,7 +261,7 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
         };
         window.addEventListener('keydown', handleGlobalKeyDown);
         return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-    }, [body, metadata, filePath, showSearch]);
+    }, [body, metadata, filePath, showSearch, handleSave]);
 
     return (
         <div className="h-full flex flex-col bg-white dark:bg-slate-900 relative">

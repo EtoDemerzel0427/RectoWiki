@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import ContentManager from './contentManager.mjs';
 import fs from 'fs-extra';
 import path from 'path';
@@ -6,17 +6,13 @@ import chokidar from 'chokidar';
 
 // Mock dependencies
 const mocks = vi.hoisted(() => ({
-    glob: vi.fn(),
-    matter: vi.fn()
+    glob: vi.fn()
 }));
 
 vi.mock('fs-extra');
 vi.mock('chokidar');
 vi.mock('glob', () => ({
     glob: mocks.glob
-}));
-vi.mock('gray-matter', () => ({
-    default: mocks.matter
 }));
 vi.mock('electron', () => ({
     app: { isPackaged: false }
@@ -26,6 +22,9 @@ describe('ContentManager', () => {
     let contentManager;
     let mockWindow;
     const mockContentPath = '/mock/content';
+    const queueScan = (files = [], directories = []) => {
+        mocks.glob.mockResolvedValueOnce(files).mockResolvedValueOnce(directories);
+    };
 
     beforeEach(() => {
         mockWindow = {
@@ -36,7 +35,6 @@ describe('ContentManager', () => {
         };
         // Reset mocks
         mocks.glob.mockReset();
-        mocks.matter.mockReset();
 
         // Setup chokidar mock
         chokidar.watch.mockReturnValue({
@@ -52,13 +50,9 @@ describe('ContentManager', () => {
         contentManager = new ContentManager(mockWindow);
     });
 
-    afterEach(() => {
-        vi.clearAllMocks();
-    });
-
     it('should initialize and scan content', async () => {
-        mocks.glob.mockResolvedValue(['test.md']);
-        mocks.matter.mockReturnValue({ data: { title: 'Test' }, content: 'Content' });
+        queueScan(['test.md']);
+        fs.readFile.mockResolvedValue('---\ntitle: Test\n---\nContent');
 
         await contentManager.initialize(mockContentPath);
 
@@ -68,23 +62,19 @@ describe('ContentManager', () => {
     });
 
     it('should sanitize Date objects in frontmatter', async () => {
-        mocks.glob.mockResolvedValue(['date-test.md']);
-        const dateObj = new Date('2023-01-01T00:00:00.000Z');
-        mocks.matter.mockReturnValue({
-            data: { title: 'Date Test', date: dateObj },
-            content: 'Content'
-        });
+        queueScan(['date-test.md']);
+        fs.readFile.mockResolvedValue('---\ntitle: Date Test\ndate: 2023-01-01\n---\nContent');
 
         await contentManager.initialize(mockContentPath);
 
         const node = contentManager.index[0];
         expect(typeof node.date).toBe('string');
-        expect(node.date).toBe(dateObj.toISOString());
+        expect(node.date).toBe('2023-01-01');
     });
 
     it('should handle missing titles by falling back to filename', async () => {
-        mocks.glob.mockResolvedValue(['no-title.md']);
-        mocks.matter.mockReturnValue({ data: {}, content: 'Content' });
+        queueScan(['no-title.md']);
+        fs.readFile.mockResolvedValue('Content');
 
         await contentManager.initialize(mockContentPath);
 
@@ -94,7 +84,7 @@ describe('ContentManager', () => {
 
     it('should handle _config.json updates', async () => {
         // Initial state
-        mocks.glob.mockResolvedValue([]);
+        queueScan();
 
         // Capture handlers
         const handlers = {};
@@ -109,6 +99,7 @@ describe('ContentManager', () => {
         // Mock pathExists to return true for config
         fs.pathExists.mockImplementation(async (p) => p.endsWith('_config.json'));
         fs.readJson.mockResolvedValue({ title: 'New Wiki Title' });
+        queueScan();
 
         await handlers['change'](path.join(mockContentPath, '_config.json'));
 
@@ -118,7 +109,7 @@ describe('ContentManager', () => {
 
     it('should handle file addition', async () => {
         // First scan returns empty
-        mocks.glob.mockResolvedValueOnce([]);
+        queueScan();
 
         const handlers = {};
         const mockOn = vi.fn((event, cb) => {
@@ -130,8 +121,8 @@ describe('ContentManager', () => {
         await contentManager.initialize(mockContentPath);
 
         // Second scan (triggered by add) returns new file
-        mocks.glob.mockResolvedValueOnce(['new-note.md']);
-        mocks.matter.mockReturnValue({ data: { title: 'New Note' }, content: '' });
+        queueScan(['new-note.md']);
+        fs.readFile.mockResolvedValue('---\ntitle: New Note\n---\n');
 
         await handlers['add'](path.join(mockContentPath, 'new-note.md'));
 
@@ -141,8 +132,8 @@ describe('ContentManager', () => {
 
     it('should handle file deletion', async () => {
         // First scan returns file
-        mocks.glob.mockResolvedValueOnce(['delete-me.md']);
-        mocks.matter.mockReturnValue({ data: { title: 'Delete Me' }, content: '' });
+        queueScan(['delete-me.md']);
+        fs.readFile.mockResolvedValue('---\ntitle: Delete Me\n---\n');
 
         const handlers = {};
         const mockOn = vi.fn((event, cb) => {
@@ -155,10 +146,30 @@ describe('ContentManager', () => {
         expect(contentManager.index).toHaveLength(1);
 
         // Second scan (triggered by unlink) returns empty
-        mocks.glob.mockResolvedValueOnce([]);
+        queueScan();
 
         await handlers['unlink'](path.join(mockContentPath, 'delete-me.md'));
 
         expect(contentManager.index).toHaveLength(0);
+    });
+
+    it('does not let frontmatter overwrite structural fields', async () => {
+        queueScan(['safe.md']);
+        fs.readFile.mockResolvedValue(`---
+id: ../outside
+filePath: /tmp/outside
+isFolder: true
+title: Safe title
+---
+Content`);
+
+        await contentManager.initialize(mockContentPath);
+
+        expect(contentManager.index[0]).toMatchObject({
+            id: 'safe',
+            filePath: 'content/safe.md',
+            isFolder: false,
+            title: 'Safe title'
+        });
     });
 });

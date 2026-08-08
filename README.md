@@ -1,165 +1,160 @@
 <div align="center">
-  <img src="public/logo.png" alt="RectoWiki Logo" width="120" height="120" />
+  <img src="public/logo.png" alt="RectoWiki W logo" width="128" height="128" />
   <h1>RectoWiki</h1>
-  <p>
-    <b>A modern, personal wiki application built with React, Vite, and Electron.</b>
-  </p>
+  <p><b>A local-first Markdown wiki that is both a desktop editor and a publishable website.</b></p>
   <p>
     <a href="https://github.com/EtoDemerzel0427/RectoWiki/releases">
-      <img src="https://img.shields.io/github/release-date-pre/EtoDemerzel0427/RectoWiki" alt="GitHub Release" />
+      <img src="https://img.shields.io/github/v/release/EtoDemerzel0427/RectoWiki?include_prereleases" alt="Latest release" />
+    </a>
+    <a href="https://github.com/EtoDemerzel0427/RectoWiki/actions/workflows/deploy.yml">
+      <img src="https://github.com/EtoDemerzel0427/RectoWiki/actions/workflows/deploy.yml/badge.svg" alt="GitHub Pages deployment" />
     </a>
   </p>
   <p>
-    <b>Latest Release: v0.5.0 is out!</b> <a href="https://github.com/EtoDemerzel0427/RectoWiki/releases">Download for macOS/Windows/Linux</a>
-  </p>
-  <p>
-    <img src="docs/images/web-view.png" alt="Web View" width="45%" />
-    <img src="docs/images/app-split-view.png" alt="App Split View" width="45%" />
+    <a href="https://github.com/EtoDemerzel0427/RectoWiki/releases"><b>Download the desktop app for macOS, Windows, or Linux</b></a>
   </p>
 </div>
 
-**RectoWiki** offers the best of both worlds: a **Static Web Wiki** for hosting your knowledge online, and a **Native Desktop App** for offline editing and management.
+RectoWiki uses ordinary Markdown files as its source of truth. The Electron desktop app edits a folder on your computer directly; the same folder can be compiled by Vite and published as a fast, read-only digital garden. There is no proprietary note database and no required cloud service.
 
-Built with React, Vite, and Electron, it seamlessly bridges the gap between a public digital garden and a private, local-first note-taking tool.
+<p align="center">
+  <img src="docs/images/web-view.png" alt="RectoWiki web mode displaying a rendered note" width="48%" />
+  <img src="docs/images/desktop-view.png" alt="RectoWiki desktop app rendering a local Markdown note" width="48%" />
+</p>
 
 ## Features
 
-- **Markdown Support**: Write content in standard Markdown.
-- **Math Equations**: LaTeX support via KaTeX (`$E=mc^2$`).
-- **Code Highlighting**: Syntax highlighting for code blocks.
-- **Wiki Links**: Internal linking using `[[Wiki Link]]` syntax.
-- **Clean URLs**: Path-based routing (e.g., `/Category/Page`).
-- **Responsive Design**: Mobile-friendly with a collapsible sidebar.
-- **Dark Mode**: Toggle between light and dark themes.
-- **Search & Filtering**: Real-time search and tag filtering.
-- **File-Based**: Content is generated from a local folder structure.
+### Rich Markdown reading
 
-## Project Structure
+- GitHub Flavored Markdown, tables, task lists, and external links
+- `[[Wiki Link]]` navigation between notes
+- LaTeX mathematics rendered with KaTeX
+- Syntax-highlighted code blocks loaded on demand
+- ABC music notation with responsive sheet music and audio playback
+- Tags, dates, categories, configurable home page, and per-page appearance metadata
+- Full-text search, tag filtering, dark mode, responsive navigation, and shareable hash links
 
-```
-recto-wiki/
-├── content/           # Your Markdown files (the wiki content)
-├── public/            # Static assets
-│   ├── content.json   # Generated content index (for dev/web)
-│   └── logo.png       # Application logo
-├── scripts/           # Build scripts
-│   └── generate-content.js # Script to parse markdown and generate JSON
-├── electron/          # Electron main process code
-│   ├── main.cjs       # Main process entry point
-│   ├── preload.cjs    # Preload script
-│   └── contentManager.mjs # Content indexing and watching logic
-├── src/               # React source code
-├── index.html         # Entry point
-├── vite.config.js     # Vite configuration
-└── package.json       # Dependencies and scripts
-```
+### Local-first desktop editing
 
-## Getting Started
+- Choose any local folder as the wiki content directory
+- Side-by-side live preview and Markdown editor with a resizable divider
+- Frontmatter fields for title, date, tags, category, and draft status
+- Manual save or debounced automatic save using atomic file replacement
+- Create, rename, delete, reorder, and drag notes or folders in the tree
+- Automatic refresh when Markdown files or configuration change on disk
+- Global and per-page font themes and content sizes
+- Works offline after installation
 
-### Prerequisites
+### Static web publishing
 
-- Node.js (v18 or higher)
-- npm (v9 or higher)
+- Converts the content tree into a static JSON index during the build
+- Lazy-loads heavy renderers so ordinary pages start faster
+- Supports subpath deployments such as GitHub Pages project sites
+- Includes a GitHub Actions workflow that deploys `main` to GitHub Pages
 
-### Installation
+## Quick start
 
-1.  Clone the repository:
-    ```bash
-    git clone https://github.com/yourusername/recto-wiki.git
-    cd recto-wiki
-    ```
+RectoWiki requires Node.js 20 or newer and npm.
 
-2.  Install dependencies:
-    ```bash
-    npm install
-    ```
-
-### Local Development
-
-1.  Start the development server:
-    ```bash
-    npm run dev
-    ```
-    The app will be available at `http://localhost:5173/`.
-
-2.  **Adding Content**:
-    - Create `.md` files in the `content/` directory.
-    - You can use subdirectories to create categories (e.g., `content/Physics/Quantum.md`).
-    - Add frontmatter to your markdown files for metadata:
-      ```markdown
-      ---
-      title: My Note Title
-      date: 2023-10-27
-      tags: [tag1, tag2]
-      ---
-      ```
-
-3.  **Updating Content**:
-    - **Web Mode**: Run `npm run gen-content` to update `content.json`.
-    - **Electron Mode**: Content is updated **automatically in real-time** as you save files!
-
-## Desktop App (Electron)
-
-This project provides a robust desktop application wrapper built with Electron.
-
-![Screenshot](public/screenshot.png)
-
-### Features
-
-- **Real-Time Updates**: Edits to markdown files are reflected instantly in the app.
-- **Custom Content Location**: Choose any folder on your computer to serve as your wiki.
-- **Local File System**: Directly edit files on your hard drive.
-- **Native Menus**: Context menus for file operations (rename, delete, etc.).
-- **Offline Capable**: Works without an internet connection.
-
-### Running the Desktop App
-
-1.  Start the development version:
-    ```bash
-    npm run electron:dev
-    ```
-
-2.  Build for production (Mac/Windows/Linux):
-    ```bash
-    npm run electron:build
-    ```
-    The executable will be in the `dist_electron/` folder.
-
-    > **Note for macOS Users:**
-    > If you see a "damaged" error when opening the app, run this command in your terminal to bypass Gatekeeper:
-    > ```bash
-    > xattr -cr /Applications/RectoWiki.app
-    > ```
-
-## Testing
-
-We use `vitest` for unit testing. The test suite covers the Content Manager, File System utilities, and Build Scripts.
-
-Run all tests with:
 ```bash
-npm test
+git clone https://github.com/EtoDemerzel0427/RectoWiki.git
+cd RectoWiki
+npm ci
+npm run dev
 ```
 
-## Publishing to the Web
- 
- If you are using the Desktop App and want to publish your notes as a website (like this one), follow these steps:
- 
- 1.  **Get the Web Engine**:
-     - Fork and clone this repository to your computer.
- 
- 2.  **Connect the App**:
-     - Open the Desktop App settings.
-     - In "Content Location", click **Browse** and select the `content` folder inside your cloned repository.
-     - Now, anything you write in the App is saved directly to your repository!
- 
- 3.  **Deploy**:
-     - **GitHub Pages**: Go to your repository Settings -> Pages, select "GitHub Actions" as the source. Then push your changes to the `main` branch.
-     - **Netlify/Vercel**: Connect your repository and use `npm run build` as the build command and `dist` as the output directory.
+The web development server is available at `http://localhost:5173/`.
+
+To run the desktop editor during development:
+
+```bash
+npm run electron:dev
+```
+
+## Writing content
+
+Add Markdown files below `content/`. Subdirectories become folders in the navigation tree.
+
+```markdown
+---
+title: My Note
+date: 2026-08-08
+tags: [reference, example]
+category: Notes
+draft: false
+---
+
+# My Note
+
+Link to [[Another Note]], write math such as $E = mc^2$, or add a fenced code block.
+```
+
+Generate the browser-readable content index and build the static site with:
+
+```bash
+npm run build
+```
+
+In desktop mode, RectoWiki watches the selected content directory and reflects file changes automatically.
+
+## Desktop app
+
+![RectoWiki desktop app](public/screenshot.png)
+
+Build native installers with:
+
+```bash
+npm run electron:build
+```
+
+Artifacts are written to `dist_electron/`. Release tags matching `v*` trigger the multi-platform release workflow.
+
+> Unsigned macOS builds may be quarantined after download. If you trust the artifact you built or downloaded, remove the quarantine attribute with `xattr -cr /Applications/RectoWiki.app`.
+
+## Publish your notes with GitHub Pages
+
+1. Fork this repository and place your Markdown files in `content/`.
+2. In the repository settings, choose **GitHub Actions** as the Pages source.
+3. Push to `main`. The included workflow generates the content index, builds the site, and deploys `dist/`.
+4. Optionally point the desktop app's **Content Location** setting at that same `content/` folder, then commit and push when you want to publish local edits.
+
+For Netlify or Vercel, use `npm run build` as the build command and `dist` as the output directory.
+
+## Scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the Vite development server |
+| `npm run gen-content` | Regenerate `public/content.json` from Markdown |
+| `npm run build` | Generate content and build the static website |
+| `npm run preview` | Preview the production web build |
+| `npm run electron:dev` | Run Vite and Electron together |
+| `npm run electron:build` | Build the website and native installers |
+| `npm test` | Run the Vitest suite |
+| `npm run lint` | Run ESLint |
+
+## Project structure
+
+```text
+RectoWiki/
+├── content/                 # Markdown notes and wiki configuration
+├── docs/images/             # README screenshots
+├── electron/                # Desktop main process and content watcher
+├── public/
+│   ├── content.json         # Generated web content index
+│   ├── logo.png             # Web, favicon, and packaged app icon
+│   └── screenshot.png       # Desktop overview used in this README
+├── scripts/                 # Static content generation
+├── src/                     # React interface and Markdown renderers
+├── .github/workflows/       # Pages deployment and native releases
+└── package.json
+```
 
 ## Customization
 
-- **Logo**: Replace `public/logo.png` with your own image.
-- **Styles**: Edit `src/index.css` or `tailwind.config.js` to customize the look and feel.
+- Set the wiki title, home page, global font theme, and content size in the desktop settings.
+- Replace `public/logo.png` to update the sidebar, mobile header, favicon, README, and packaged application icon together.
+- Edit `src/index.css` and `tailwind.config.js` for deeper visual changes.
 
 ## License
 

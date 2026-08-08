@@ -2,9 +2,9 @@ import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import chokidar from 'chokidar';
-import matter from 'gray-matter';
 import { glob } from 'glob';
 import { app } from 'electron';
+import { parseFrontmatter } from './frontmatter.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,6 +19,11 @@ class ContentManager {
     }
 
     async initialize(contentPath) {
+        if (this.watcher) {
+            await this.watcher.close();
+            this.watcher = null;
+        }
+
         this.contentPath = contentPath;
         console.log(`[ContentManager] Initializing with path: ${this.contentPath}`);
 
@@ -103,7 +108,7 @@ class ContentManager {
                 // const stats = await fs.stat(fullPath); // Unused
 
                 const content = await fs.readFile(fullPath, 'utf-8');
-                const { data, content: body } = matter(content);
+                const { metadata: data } = parseFrontmatter(content);
 
                 // Sanitize data to ensure no Date objects (which crash React)
                 const safeData = {};
@@ -126,6 +131,7 @@ class ContentManager {
                 const title = String(rawTitle); // Ensure title is string
 
                 const node = {
+                    ...safeData,
                     id: id,
                     title: title,
                     isFolder: false,
@@ -134,8 +140,7 @@ class ContentManager {
                     sortIndex: safeData.sortIndex || 999,
                     fileName: fileName,
                     filePath: `content/${relativePath}`, // Keep relative for frontend compatibility
-                    content: content, // Use raw content (with frontmatter) so frontend can parse metadata
-                    ...safeData
+                    content: content // Use raw content (with frontmatter) so frontend can parse metadata
                 };
 
                 nodes.push(node);
@@ -212,23 +217,19 @@ class ContentManager {
     }
 
     startWatcher() {
-        if (this.watcher) {
-            this.watcher.close();
-        }
-
         console.log('[ContentManager] Starting watcher...');
         this.watcher = chokidar.watch(this.contentPath, {
-            ignored: /(^|[\/\\])\../, // ignore dotfiles
+            ignored: /(^|[/\\])\../, // ignore dotfiles
             persistent: true,
             ignoreInitial: true
         });
 
         this.watcher
-            .on('add', async path => { console.log(`File ${path} has been added`); await this.scan(); })
-            .on('change', async path => { console.log(`File ${path} has been changed`); await this.scan(); })
-            .on('unlink', async path => { console.log(`File ${path} has been removed`); await this.scan(); })
-            .on('addDir', async path => { console.log(`Directory ${path} has been added`); await this.scan(); })
-            .on('unlinkDir', async path => { console.log(`Directory ${path} has been removed`); await this.scan(); });
+            .on('add', async changedPath => { console.log(`File ${changedPath} has been added`); await this.scan(); })
+            .on('change', async changedPath => { console.log(`File ${changedPath} has been changed`); await this.scan(); })
+            .on('unlink', async changedPath => { console.log(`File ${changedPath} has been removed`); await this.scan(); })
+            .on('addDir', async changedPath => { console.log(`Directory ${changedPath} has been added`); await this.scan(); })
+            .on('unlinkDir', async changedPath => { console.log(`Directory ${changedPath} has been removed`); await this.scan(); });
     }
 
     notifyFrontend() {
@@ -263,9 +264,10 @@ class ContentManager {
         };
     }
 
-    dispose() {
+    async dispose() {
         if (this.watcher) {
-            this.watcher.close();
+            await this.watcher.close();
+            this.watcher = null;
         }
     }
 }

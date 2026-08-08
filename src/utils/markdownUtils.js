@@ -14,7 +14,7 @@ export const stripMarkdown = (markdown) => {
     output = output.replace(/<[^>]*>/g, '');
 
     // 3. Remove Images: ![alt](url) -> alt
-    output = output.replace(/\!\[(.*?)\]\s*\(.*?\)/g, '$1');
+    output = output.replace(/!\[(.*?)\]\s*\(.*?\)/g, '$1');
 
     // 4. Remove Inline Links: [text](url) -> text
     output = output.replace(/\[(.*?)\]\s*\(.*?\)/g, '$1');
@@ -23,15 +23,15 @@ export const stripMarkdown = (markdown) => {
     output = output.replace(/\[\[([^|\]]+\|)?([^\]]+)\]\]/g, '$2');
 
     // 6. Remove ATX-style headers: # Header -> Header
-    output = output.replace(/^(\s{0,3}\#{1,6}\s*([^#\n]*)\s*(\#{1,6})?)/gm, '$2');
+    output = output.replace(/^(\s{0,3}#{1,6}\s*([^#\n]*)\s*(#{1,6})?)/gm, '$2');
 
     // 7. Remove Setext-style headers: Header\n=== -> Header
-    output = output.replace(/^[=\-]{2,}\s*$/gm, '');
+    output = output.replace(/^[=-]{2,}\s*$/gm, '');
 
     // 8. Remove Emphasis (Bold/Italic): **text**, *text*, __text__, _text_
     // We run this twice to handle nested styles like ***text***
-    output = output.replace(/([\*_]{1,3})(\S.*?\S{0,1})\1/g, '$2');
-    output = output.replace(/([\*_]{1,3})(\S.*?\S{0,1})\1/g, '$2');
+    output = output.replace(/([*_]{1,3})(\S.*?\S{0,1})\1/g, '$2');
+    output = output.replace(/([*_]{1,3})(\S.*?\S{0,1})\1/g, '$2');
 
     // 9. Remove Blockquotes: > text -> text
     output = output.replace(/^\s{0,3}>\s?/gm, '');
@@ -43,16 +43,16 @@ export const stripMarkdown = (markdown) => {
     output = output.replace(/`(.+?)`/g, '$1');
 
     // 12. Remove Horizontal rules: ---, ***, ___
-    output = output.replace(/^[-\*_]{3,}\s*$/gm, '');
+    output = output.replace(/^[-*_]{3,}\s*$/gm, '');
 
     // 13. Remove List markers: *, -, +, 1.
-    output = output.replace(/^[\s]*[\*\-\+]\s+/gm, '');
+    output = output.replace(/^\s*[*+-]\s+/gm, '');
     output = output.replace(/^[\s]*\d+\.\s+/gm, '');
 
     // 14. Remove all remaining markdown-style markers that might be cluttering the text
     // Such as remaining *, _, #, etc. at the beginning or end of words
-    output = output.replace(/(^|\s)[\*\-_]+(\s|$)/g, '$1$2'); // Remove isolated markers
-    output = output.replace(/[\*\-_]/g, ''); // Remove any remaining * or _ characters
+    output = output.replace(/(^|\s)[*_-]+(\s|$)/g, '$1$2'); // Remove isolated markers
+    output = output.replace(/[*_-]/g, ''); // Remove any remaining * or _ characters
 
     // 15. Cleanup multiple newlines and spaces
     return output

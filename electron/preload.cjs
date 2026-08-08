@@ -7,7 +7,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteFile: (path) => ipcRenderer.invoke('delete-file', path),
     createDir: (path) => ipcRenderer.invoke('create-dir', path),
     renamePath: (oldPath, newPath) => ipcRenderer.invoke('rename-path', oldPath, newPath),
-    getRootPath: () => ipcRenderer.invoke('get-root-path'),
     runGenerator: () => ipcRenderer.invoke('run-generator'),
     getContent: () => ipcRenderer.invoke('get-content'),
     onContentUpdated: (callback) => {
@@ -15,7 +14,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('content-updated', subscription);
         return () => ipcRenderer.removeListener('content-updated', subscription);
     },
-    onAutoSaveChange: (callback) => ipcRenderer.on('auto-save-change', (event, value) => callback(value)),
+    onAutoSaveChange: (callback) => {
+        const subscription = (_event, value) => callback(value);
+        ipcRenderer.on('auto-save-change', subscription);
+        return () => ipcRenderer.removeListener('auto-save-change', subscription);
+    },
     getAutoSaveStatus: () => ipcRenderer.invoke('get-auto-save-status'),
     selectContentFolder: () => ipcRenderer.invoke('select-content-folder'),
     getSettings: () => ipcRenderer.invoke('get-settings'),

@@ -4,8 +4,6 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import 'katex/dist/katex.min.css';
 import {
     Home,
@@ -14,16 +12,37 @@ import {
     Link as LinkIcon,
     Gauge
 } from 'lucide-react';
-import abcjs from 'abcjs';
-import 'abcjs/abcjs-audio.css';
+
+const SyntaxHighlightedCode = React.lazy(() => import('./SyntaxHighlightedCode'));
 
 const AbcRenderer = ({ content }) => {
     const visualRef = useRef(null);
     const audioRef = useRef(null);
     const synthControlRef = useRef(null);
+    const speedRef = useRef(100);
     const [showSpeedControl, setShowSpeedControl] = useState(false);
     const speedControlRef = useRef(null);
     const [speed, setSpeed] = useState(100);
+    const [abcjs, setAbcjs] = useState(null);
+    const [loadError, setLoadError] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        Promise.all([
+            import('abcjs'),
+            import('abcjs/abcjs-audio.css')
+        ]).then(([module]) => {
+            if (!cancelled) setAbcjs(module.default || module);
+        }).catch((error) => {
+            console.error('Failed to load the ABC renderer', error);
+            if (!cancelled) setLoadError(true);
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
         // Close speed control when clicking outside
@@ -43,7 +62,7 @@ const AbcRenderer = ({ content }) => {
     }, [showSpeedControl]);
 
     useEffect(() => {
-        if (!visualRef.current) return;
+        if (!abcjs || !visualRef.current) return;
 
         // Render visual
         const visualObj = abcjs.renderAbc(visualRef.current, content, {
@@ -108,18 +127,23 @@ const AbcRenderer = ({ content }) => {
                         chordsOff: false
                     }).then(() => {
                         // Apply current speed
-                        synthControl.setWarp(speed);
+                        synthControl.setWarp(speedRef.current);
                     }).catch(console.warn);
                 }).catch(console.warn);
             } catch (e) {
                 console.warn("Audio synth init failed", e);
             }
         }
-    }, [content]);
+        return () => {
+            synthControlRef.current?.pause?.();
+            synthControlRef.current = null;
+        };
+    }, [abcjs, content]);
 
     const handleSpeedChange = (e) => {
         const newSpeed = parseInt(e.target.value, 10);
         setSpeed(newSpeed);
+        speedRef.current = newSpeed;
         if (synthControlRef.current) {
             synthControlRef.current.setWarp(newSpeed);
         }
@@ -129,9 +153,15 @@ const AbcRenderer = ({ content }) => {
         <div className="my-6 p-4 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700">
             <div className="overflow-x-auto pb-2">
                 <div ref={visualRef} className="abcjs-visual-container min-w-min" />
+                {!abcjs && !loadError && (
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Loading music notation…</p>
+                )}
+                {loadError && (
+                    <p className="text-sm text-rose-600 dark:text-rose-400">Unable to load music notation.</p>
+                )}
             </div>
 
-            {abcjs.synth.supportsAudio() && (
+            {abcjs?.synth?.supportsAudio() && (
                 <div className="mt-4 flex items-center h-10 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md px-2">
                     <div ref={audioRef} className="flex-1 h-full flex items-center" />
 
@@ -195,15 +225,15 @@ const staticMarkdownComponents = {
                         <div className="w-2.5 h-2.5 rounded-full bg-green-500/80"></div>
                     </div>
                 </div>
-                <SyntaxHighlighter
-                    style={tomorrow}
-                    language={match[1]}
-                    PreTag="div"
-                    customStyle={{ margin: 0, padding: '1rem', background: 'transparent' }}
-                    {...props}
-                >
-                    {String(children).replace(/\n$/, '')}
-                </SyntaxHighlighter>
+                <React.Suspense fallback={(
+                    <pre className="m-0 p-4 overflow-x-auto text-sm text-slate-100">
+                        <code>{String(children).replace(/\n$/, '')}</code>
+                    </pre>
+                )}>
+                    <SyntaxHighlightedCode language={match[1]} {...props}>
+                        {String(children).replace(/\n$/, '')}
+                    </SyntaxHighlightedCode>
+                </React.Suspense>
             </div>
         ) : (
             <code className="bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded text-sm font-mono mx-1 border border-slate-200 dark:border-slate-700" {...props}>
