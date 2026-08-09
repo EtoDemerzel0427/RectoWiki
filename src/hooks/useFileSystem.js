@@ -2,10 +2,47 @@ import { useState, useEffect, useCallback } from 'react';
 import { isElectron, readFile, writeFile, createFile, deleteFile, createDir, renamePath, sanitizeFilename } from '../utils/fileSystem';
 import { parseFrontmatter, stringifyFrontmatter } from '../utils/frontmatter';
 
+export const sharesOrderingMetadata = (candidate, item) => {
+    const candidateRoot = candidate?.sourceRoot || 'content';
+    const itemRoot = item?.sourceRoot || 'content';
+
+    if (candidate?.parentId !== item?.parentId || candidateRoot !== itemRoot) {
+        return false;
+    }
+
+    // Local drafts share a regular _meta.json inside their isolated tree.
+    // Published content and legacy repository drafts use separate metadata
+    // files, so they must never be included in each other's reorder list.
+    return itemRoot === 'drafts' || Boolean(candidate?.draft) === Boolean(item?.draft);
+};
+
 export const useFileSystem = () => {
     const [notes, setNotes] = useState([]);
     const [wikiConfig, setWikiConfig] = useState({ title: "RectoWiki" });
     const [loading, setLoading] = useState(true);
+
+    const getSourceRoot = (itemOrRoot = 'content') => {
+        if (typeof itemOrRoot === 'string') return itemOrRoot;
+        return itemOrRoot?.sourceRoot || 'content';
+    };
+
+    const getNodePath = (item) => {
+        if (item?.filePath) return item.filePath;
+        const sourceRoot = getSourceRoot(item);
+        const parentPath = item?.parentId ? `${sourceRoot}/${item.parentId}` : sourceRoot;
+        return `${parentPath}/${item.fileName}`;
+    };
+
+    const getMetaPath = (parentId, isDraft = false, sourceRoot = 'content') => {
+        const root = sourceRoot === 'drafts' ? 'drafts' : 'content';
+        const parentPath = parentId ? `${root}/${parentId}` : root;
+        // Legacy public draft files may still use _draft_meta.json. Local
+        // drafts use their own ignored tree and a regular _meta.json.
+        const metaFile = sourceRoot === 'drafts'
+            ? '_meta.json'
+            : (isDraft ? '_draft_meta.json' : '_meta.json');
+        return `${parentPath}/${metaFile}`;
+    };
 
     const loadNotes = useCallback(async (isBackground = false) => {
         if (!isBackground) setLoading(true);
@@ -59,7 +96,7 @@ export const useFileSystem = () => {
 
 
 
-    const handleCreateFile = async (name, parentId = null) => {
+    const handleCreateFile = async (name, parentId = null, sourceRoot = 'drafts') => {
         if (!isElectron() || !name) return;
 
         const rawName = name.replace(/\.md$/, '');
@@ -70,7 +107,7 @@ export const useFileSystem = () => {
         }
         const fileName = `${sanitizedName}.md`;
         // Construct path based on parentId
-        const parentPath = parentId ? `content/${parentId}` : 'content';
+        const parentPath = parentId ? `${sourceRoot}/${parentId}` : sourceRoot;
         const filePath = `${parentPath}/${fileName}`;
 
         try {
@@ -91,7 +128,7 @@ export const useFileSystem = () => {
                 date: initialDate,
                 tags: [],
                 category: initialCategory,
-                draft: false,
+                draft: sourceRoot === 'drafts',
             }, '');
             await createFile(filePath, fileContent);
 
@@ -100,11 +137,12 @@ export const useFileSystem = () => {
                 id: parentId ? `${parentId}/${sanitizedName}` : sanitizedName,
                 title: initialTitle,
                 slug: initialSlug,
-                filePath: `${parentPath}/${fileName}`, // Add filePath
+                filePath: `${parentPath}/${fileName}`,
+                sourceRoot,
                 category: initialCategory, // Simple category logic
                 tags: [],
                 date: initialDate,
-                draft: false,
+                draft: sourceRoot === 'drafts',
                 content: fileContent,
                 parentId: parentId,
                 isFolder: false,
@@ -113,8 +151,8 @@ export const useFileSystem = () => {
 
             setNotes(prev => [...prev, newNote]);
 
-            // Update meta.json in the specific directory (Always public for new files initially)
-            await updateMeta(parentId, sanitizedName, false); // Use title (no extension) for meta as per previous logic
+            // Keep local drafts ordered in their ignored metadata tree.
+            await updateMeta(parentId, sanitizedName, sourceRoot === 'drafts', sourceRoot);
 
             // Trigger content regeneration
             await window.electronAPI.runGenerator();
@@ -124,7 +162,7 @@ export const useFileSystem = () => {
         }
     };
 
-    const handleCreateDir = async (name, parentId = null) => {
+    const handleCreateDir = async (name, parentId = null, sourceRoot = 'drafts') => {
         if (!isElectron() || !name) return;
 
         const sanitizedName = sanitizeFilename(name);
@@ -132,7 +170,7 @@ export const useFileSystem = () => {
             alert('Please choose a valid folder name.');
             return;
         }
-        const parentPath = parentId ? `content/${parentId}` : 'content';
+        const parentPath = parentId ? `${sourceRoot}/${parentId}` : sourceRoot;
         const dirPath = `${parentPath}/${sanitizedName}`;
 
         try {
@@ -145,10 +183,11 @@ export const useFileSystem = () => {
                 parentId: parentId,
                 isFolder: true,
                 children: [],
-                fileName: sanitizedName
+                fileName: sanitizedName,
+                sourceRoot
             };
             setNotes(prev => [...prev, newFolder]);
-            await updateMeta(parentId, sanitizedName);
+            await updateMeta(parentId, sanitizedName, sourceRoot === 'drafts', sourceRoot);
 
         } catch (error) {
             alert("Failed to create folder: " + error.message);
@@ -168,8 +207,7 @@ export const useFileSystem = () => {
             // If item has parentId, path is content/parentId/fileName
             // If root, content/fileName
 
-            const parentPath = item.parentId ? `content/${item.parentId}` : 'content';
-            const filePath = `${parentPath}/${item.fileName}`;
+            const filePath = getNodePath(item);
 
             // If it's a folder, we might need recursive delete?
             // fs.unlink only works for files. fs.rm for dirs.
@@ -183,7 +221,7 @@ export const useFileSystem = () => {
             setNotes(prev => prev.filter(n => n.id !== item.id));
 
             // Update _meta.json or _draft_meta.json
-            await removeFromMeta(item.parentId, item.fileName.replace('.md', ''), item.draft);
+            await removeFromMeta(item.parentId, item.fileName.replace('.md', ''), item.draft, getSourceRoot(item));
 
             // Trigger content regeneration
             await window.electronAPI.runGenerator();
@@ -197,7 +235,8 @@ export const useFileSystem = () => {
         if (!isElectron() || !newName || newName === item.title) return;
 
         try {
-            const parentPath = item.parentId ? `content/${item.parentId}` : 'content';
+            const sourceRoot = getSourceRoot(item);
+            const parentPath = item.parentId ? `${sourceRoot}/${item.parentId}` : sourceRoot;
             const oldFileName = item.fileName;
 
             const rawNewName = newName.replace(/\.md$/, '');
@@ -244,8 +283,7 @@ export const useFileSystem = () => {
             // We need to remove the old name and add the new name (without extension)
             // Ideally, we keep the position?
             // Let's try to replace it in place to preserve order.
-            const metaFile = item.draft ? '_draft_meta.json' : '_meta.json';
-            const metaPath = `${parentPath}/${metaFile}`;
+            const metaPath = getMetaPath(item.parentId, item.draft, sourceRoot);
             try {
                 const content = await readFile(metaPath);
                 let meta = JSON.parse(content);
@@ -258,7 +296,7 @@ export const useFileSystem = () => {
                     await writeFile(metaPath, JSON.stringify(meta, null, 2));
                 }
             } catch (e) {
-                console.warn(`Failed to update ${metaFile} during rename`, e);
+                console.warn(`Failed to update metadata during rename`, e);
             }
 
             // 3. Optimistic State Update
@@ -298,8 +336,10 @@ export const useFileSystem = () => {
     const handleReorder = async (item, direction) => {
         if (!isElectron()) return;
 
-        // 1. Get siblings
-        const siblings = notes.filter(n => n.parentId === item.parentId).sort((a, b) => {
+        // 1. Get siblings governed by the same metadata file. The UI merges
+        // published content and local drafts, but their ordering files must
+        // remain isolated from one another.
+        const siblings = notes.filter(n => sharesOrderingMetadata(n, item)).sort((a, b) => {
             // Use current sortIndex
             return (a.sortIndex || 0) - (b.sortIndex || 0);
         });
@@ -334,9 +374,7 @@ export const useFileSystem = () => {
 
         const metaNames = sortedSiblings.map(s => s.fileName.replace('.md', ''));
 
-        const parentPath = item.parentId ? `content/${item.parentId}` : 'content';
-        const metaFile = item.draft ? '_draft_meta.json' : '_meta.json';
-        const metaPath = `${parentPath}/${metaFile}`;
+        const metaPath = getMetaPath(item.parentId, item.draft, getSourceRoot(item));
 
         try {
             await writeFile(metaPath, JSON.stringify(metaNames, null, 2));
@@ -348,10 +386,8 @@ export const useFileSystem = () => {
     };
 
     // Helper to update meta.json / _draft_meta.json
-    const updateMeta = async (parentId, nameToAdd, isDraft = false) => {
-        const parentPath = parentId ? `content/${parentId}` : 'content';
-        const metaFile = isDraft ? '_draft_meta.json' : '_meta.json';
-        const metaPath = `${parentPath}/${metaFile}`;
+    const updateMeta = async (parentId, nameToAdd, isDraft = false, sourceRoot = 'content') => {
+        const metaPath = getMetaPath(parentId, isDraft, sourceRoot);
 
         let meta = [];
         try {
@@ -391,10 +427,8 @@ export const useFileSystem = () => {
         }
     };
 
-    const removeFromMeta = async (parentId, nameToRemove, isDraft = false) => {
-        const parentPath = parentId ? `content/${parentId}` : 'content';
-        const metaFile = isDraft ? '_draft_meta.json' : '_meta.json';
-        const metaPath = `${parentPath}/${metaFile}`;
+    const removeFromMeta = async (parentId, nameToRemove, isDraft = false, sourceRoot = 'content') => {
+        const metaPath = getMetaPath(parentId, isDraft, sourceRoot);
 
         try {
             const content = await readFile(metaPath);
@@ -402,7 +436,9 @@ export const useFileSystem = () => {
             meta = meta.filter(n => n !== nameToRemove);
             await writeFile(metaPath, JSON.stringify(meta, null, 2));
         } catch (e) {
-            console.error("Failed to update _meta.json", e);
+            if (sourceRoot !== 'drafts') {
+                console.error("Failed to update _meta.json", e);
+            }
         }
     };
 
@@ -448,10 +484,11 @@ export const useFileSystem = () => {
 
                 // Better: Reconstruct sourcePath from parentId and fileName to be sure.
                 const fileName = movedNode.fileName;
-                const sourceDir = sourceParentId ? `content/${sourceParentId}` : 'content';
+                const sourceRoot = getSourceRoot(movedNode);
+                const sourceDir = sourceParentId ? `${sourceRoot}/${sourceParentId}` : sourceRoot;
                 const sourcePath = `${sourceDir}/${fileName}`;
 
-                const targetDir = targetParentId ? `content/${targetParentId}` : 'content';
+                const targetDir = targetParentId ? `${sourceRoot}/${targetParentId}` : sourceRoot;
                 const targetPath = `${targetDir}/${fileName}`;
 
                 console.log(`Moving ${sourcePath} to ${targetPath}`); // Debug log
@@ -460,7 +497,7 @@ export const useFileSystem = () => {
                 await renamePath(sourcePath, targetPath);
 
                 // Update meta in source
-                await removeFromMeta(sourceParentId, movedNode.fileName.replace('.md', ''), movedNode.draft);
+                await removeFromMeta(sourceParentId, movedNode.fileName.replace('.md', ''), movedNode.draft, sourceRoot);
 
                 // Update _meta.json in target
                 // If 'inside', append to end.
@@ -469,7 +506,7 @@ export const useFileSystem = () => {
                 // Wait, if sourceParentId !== targetParentId, and action is 'before'/'after',
                 // it means we dragged from Folder A to position X in Folder B.
 
-                await addToMeta(targetParentId, fileName.replace('.md', ''), targetItemId, action, movedNode.draft);
+                await addToMeta(targetParentId, fileName.replace('.md', ''), targetItemId, action, movedNode.draft, sourceRoot);
 
                 // Update local state optimistically?
                 // It's complex to update paths for all children if it's a folder.
@@ -485,9 +522,7 @@ export const useFileSystem = () => {
                 if (targetItemId === 'root') return;
 
                 // Only need to update meta
-                const parentPath = sourceParentId ? `content/${sourceParentId}` : 'content';
-                const metaFile = movedNode.draft ? '_draft_meta.json' : '_meta.json';
-                const metaPath = `${parentPath}/${metaFile}`;
+                const metaPath = getMetaPath(sourceParentId, movedNode.draft, getSourceRoot(movedNode));
 
                 let meta = [];
                 try {
@@ -534,10 +569,8 @@ export const useFileSystem = () => {
         }
     };
 
-    const addToMeta = async (parentId, nameToAdd, targetItemId, action, isDraft = false) => {
-        const parentPath = parentId ? `content/${parentId}` : 'content';
-        const metaFile = isDraft ? '_draft_meta.json' : '_meta.json';
-        const metaPath = `${parentPath}/${metaFile}`;
+    const addToMeta = async (parentId, nameToAdd, targetItemId, action, isDraft = false, sourceRoot = 'content') => {
+        const metaPath = getMetaPath(parentId, isDraft, sourceRoot);
 
         let meta = [];
         try {

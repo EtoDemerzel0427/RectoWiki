@@ -89,3 +89,16 @@ export const renamePath = async (oldPath, newPath) => {
         throw new Error('Rename operation not supported in browser mode');
     }
 };
+
+export const publishDraft = async (draftPath, content) => {
+    if (!isElectron() || !window.electronAPI?.publishDraft) {
+        throw new Error('Publishing drafts is only supported in the desktop app');
+    }
+
+    const result = await window.electronAPI.publishDraft(draftPath, content);
+    if (!result.success) {
+        throw new Error(result.error);
+    }
+
+    return result.filePath;
+};

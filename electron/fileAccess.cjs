@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const { promises: fs } = require('fs');
 
 const CONTENT_PREFIX = 'content/';
+const DRAFTS_PREFIX = 'drafts/';
 
 function getContentRelativePath(requestPath) {
     if (typeof requestPath !== 'string' || requestPath.includes('\0')) {
@@ -10,31 +11,38 @@ function getContentRelativePath(requestPath) {
     }
 
     if (requestPath === 'public/content.json') {
-        return 'content.json';
+        return { relativePath: 'content.json', rootType: 'content' };
     }
 
-    if (!requestPath.startsWith(CONTENT_PREFIX)) {
-        throw new Error('File access is limited to the content directory');
+    if (!requestPath.startsWith(CONTENT_PREFIX) && !requestPath.startsWith(DRAFTS_PREFIX)) {
+        throw new Error('File access is limited to the content or drafts directory');
     }
 
-    const relativePath = requestPath.slice(CONTENT_PREFIX.length);
+    const prefix = requestPath.startsWith(DRAFTS_PREFIX) ? DRAFTS_PREFIX : CONTENT_PREFIX;
+    const relativePath = requestPath.slice(prefix.length);
     if (!relativePath) {
         throw new Error('The content root cannot be modified directly');
     }
 
-    return relativePath;
+    return {
+        relativePath,
+        rootType: requestPath.startsWith(DRAFTS_PREFIX) ? 'drafts' : 'content',
+    };
 }
 
 function resolveContentPath(contentRoot, requestPath) {
     const root = path.resolve(contentRoot);
-    const relativePath = getContentRelativePath(requestPath);
+    const { relativePath, rootType } = getContentRelativePath(requestPath);
 
     if (path.isAbsolute(relativePath)) {
         throw new Error('Absolute paths are not allowed');
     }
 
-    const resolvedPath = path.resolve(root, relativePath);
-    if (!resolvedPath.startsWith(`${root}${path.sep}`)) {
+    const allowedRoot = rootType === 'drafts'
+        ? path.join(path.dirname(root), '.rectowiki', 'drafts')
+        : root;
+    const resolvedPath = path.resolve(allowedRoot, relativePath);
+    if (!resolvedPath.startsWith(`${path.resolve(allowedRoot)}${path.sep}`)) {
         throw new Error('Path escapes the content directory');
     }
 
@@ -79,9 +87,27 @@ async function renameExclusive(oldPath, newPath) {
     await fs.rename(oldPath, newPath);
 }
 
+async function publishDraftFile(contentRoot, draftPath, content) {
+    if (typeof draftPath !== 'string' || !draftPath.startsWith('drafts/')) {
+        throw new Error('Only local drafts can be published');
+    }
+
+    const relativePath = draftPath.slice('drafts/'.length);
+    if (!relativePath || relativePath.split('/').includes('..')) {
+        throw new Error('Invalid draft path');
+    }
+
+    const sourcePath = resolveContentPath(contentRoot, draftPath);
+    const targetPath = resolveContentPath(contentRoot, `content/${relativePath}`);
+    await atomicWriteFile(targetPath, content);
+    await fs.rm(sourcePath, { force: false });
+    return `content/${relativePath}`;
+}
+
 module.exports = {
     atomicWriteFile,
     createFileExclusive,
     renameExclusive,
+    publishDraftFile,
     resolveContentPath,
 };

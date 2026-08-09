@@ -12,6 +12,7 @@ class ContentManager {
     constructor(mainWindow) {
         this.mainWindow = mainWindow;
         this.contentPath = null;
+        this.draftsPath = null;
         this.index = [];
         this.watcher = null;
         this.config = {};
@@ -25,6 +26,7 @@ class ContentManager {
         }
 
         this.contentPath = contentPath;
+        this.draftsPath = path.join(path.dirname(contentPath), '.rectowiki', 'drafts');
         console.log(`[ContentManager] Initializing with path: ${this.contentPath}`);
 
         // Reset state to prevent pollution from previous content location
@@ -59,123 +61,97 @@ class ContentManager {
                 this.config = {};
             }
 
-            // Read meta
-            let meta = {};
-            const metaPath = path.join(this.contentPath, '_meta.json');
-            if (await fs.pathExists(metaPath)) {
-                try {
-                    meta = await fs.readJson(metaPath);
-                } catch (e) {
-                    console.error('[ContentManager] Failed to read _meta.json:', e);
-                }
-            }
+            const nodeMap = new Map();
+            const folderMap = new Map();
+            const sources = [
+                { root: this.contentPath, prefix: 'content', isDraftSource: false, exists: true },
+                { root: this.draftsPath, prefix: 'drafts', isDraftSource: true, exists: await fs.pathExists(this.draftsPath) },
+            ];
 
-            // Find all markdown files
-            const files = await glob('**/*.md', { cwd: this.contentPath, ignore: 'node_modules/**' });
-            // Find all directories
-            const dirs = await glob('**/', { cwd: this.contentPath, ignore: 'node_modules/**' });
+            for (const source of sources) {
+                if (!source.exists) continue;
 
-            const nodes = [];
-            const processedDirs = new Set();
+                const files = await glob('**/*.md', { cwd: source.root, ignore: 'node_modules/**' });
+                const dirs = await glob('**/', { cwd: source.root, ignore: 'node_modules/**' });
 
-            // Process explicit directories first
-            for (const dir of dirs) {
-                const dirPath = dir.replace(/\\/g, '/').replace(/\/$/, '');
-                if (!dirPath || dirPath === '.') continue;
-
-                if (!processedDirs.has(dirPath)) {
-                    processedDirs.add(dirPath);
-                    const pathParts = dirPath.split('/');
-                    const folderName = pathParts[pathParts.length - 1];
-                    const parentDir = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : null;
-
-                    const folderNode = {
-                        id: dirPath,
-                        title: folderName,
-                        isFolder: true,
-                        parentId: parentDir,
-                        sortIndex: 999,
-                        children: [],
-                        fileName: folderName
-                    };
-                    nodes.push(folderNode);
-                }
-            }
-
-            for (const file of files) {
-                const relativePath = file;
-                const fullPath = path.join(this.contentPath, relativePath);
-                // const stats = await fs.stat(fullPath); // Unused
-
-                const content = await fs.readFile(fullPath, 'utf-8');
-                const { metadata: data } = parseFrontmatter(content);
-
-                // Sanitize data to ensure no Date objects (which crash React)
-                const safeData = {};
-                for (const key in data) {
-                    const value = data[key];
-                    if (value instanceof Date) {
-                        safeData[key] = value.toISOString().split('T')[0];
-                    } else {
-                        safeData[key] = value;
-                    }
-                }
-
-                const pathParts = relativePath.split('/');
-                const fileName = pathParts.pop();
-                const dirPath = pathParts.join('/');
-                const id = dirPath ? `${dirPath}/${fileName.replace('.md', '')}` : fileName.replace('.md', '');
-
-                // Create Node
-                const rawTitle = safeData.title || fileName.replace('.md', '');
-                const title = String(rawTitle); // Ensure title is string
-
-                const node = {
-                    ...safeData,
-                    id: id,
-                    title: title,
-                    isFolder: false,
-                    parentId: dirPath || null,
-                    slug: safeData.slug || id,
-                    sortIndex: safeData.sortIndex || 999,
-                    fileName: fileName,
-                    filePath: `content/${relativePath}`, // Keep relative for frontend compatibility
-                    content: content // Use raw content (with frontmatter) so frontend can parse metadata
-                };
-
-                nodes.push(node);
-
-                // Create Folder Nodes
-                let currentDir = '';
-                for (const part of pathParts) {
-                    const parentDir = currentDir;
-                    currentDir = currentDir ? `${currentDir}/${part}` : part;
-
-                    if (!processedDirs.has(currentDir)) {
-                        processedDirs.add(currentDir);
-
-                        // Check for folder meta/config if needed, or just create stub
-                        const folderNode = {
-                            id: currentDir,
-                            title: part,
+                for (const dir of dirs) {
+                    const dirPath = dir.replace(/\\/g, '/').replace(/\/$/, '');
+                    if (!dirPath || dirPath === '.') continue;
+                    const parts = dirPath.split('/');
+                    const parentId = parts.length > 1 ? parts.slice(0, -1).join('/') : null;
+                    const existing = folderMap.get(dirPath);
+                    if (!existing || source.isDraftSource) {
+                        folderMap.set(dirPath, {
+                            id: dirPath,
+                            title: parts[parts.length - 1],
                             isFolder: true,
-                            parentId: parentDir || null,
+                            parentId,
                             sortIndex: 999,
-                            children: []
-                        };
+                            children: [],
+                            fileName: parts[parts.length - 1],
+                            sourceRoot: existing?.sourceRoot || source.prefix,
+                        });
+                    }
+                }
 
-                        // Apply meta sorting if available
-                        if (meta[currentDir]) {
-                            // Logic to apply meta to folder... 
-                            // For now simple stub
+                for (const file of files) {
+                    const relativePath = file.replace(/\\/g, '/');
+                    const fullPath = path.join(source.root, relativePath);
+                    const content = await fs.readFile(fullPath, 'utf-8');
+                    const { metadata: data } = parseFrontmatter(content);
+                    const safeData = {};
+                    for (const key in data) {
+                        const value = data[key];
+                        safeData[key] = value instanceof Date
+                            ? value.toISOString().split('T')[0]
+                            : value;
+                    }
+
+                    const pathParts = relativePath.split('/');
+                    const fileName = pathParts.pop();
+                    const dirPath = pathParts.join('/');
+                    const basename = fileName.replace(/\.md$/, '');
+                    const id = dirPath ? `${dirPath}/${basename}` : basename;
+                    const node = {
+                        ...safeData,
+                        id,
+                        title: String(safeData.title || basename),
+                        isFolder: false,
+                        parentId: dirPath || null,
+                        slug: safeData.slug || id,
+                        sortIndex: safeData.sortIndex || 999,
+                        fileName,
+                        filePath: `${source.prefix}/${relativePath}`,
+                        sourceRoot: source.prefix,
+                        draft: source.isDraftSource ? true : Boolean(safeData.draft),
+                        content,
+                    };
+
+                    // A local draft overlays the published note with the same relative path.
+                    nodeMap.set(id, node);
+
+                    let currentDir = '';
+                    for (const part of pathParts) {
+                        const parentDir = currentDir;
+                        currentDir = currentDir ? `${currentDir}/${part}` : part;
+                        const existing = folderMap.get(currentDir);
+                        if (!existing || source.isDraftSource) {
+                            folderMap.set(currentDir, {
+                                id: currentDir,
+                                title: part,
+                                isFolder: true,
+                                parentId: parentDir || null,
+                                sortIndex: 999,
+                                children: [],
+                                fileName: part,
+                                sourceRoot: existing?.sourceRoot || source.prefix,
+                            });
                         }
-
-                        nodes.push(folderNode);
                     }
                 }
             }
 
-            // Group nodes by parentId (directory)
+            const nodes = [...nodeMap.values(), ...folderMap.values()];
             const nodesByParent = {};
             nodes.forEach(node => {
                 const parentId = node.parentId || 'root';
@@ -183,23 +159,32 @@ class ContentManager {
                 nodesByParent[parentId].push(node);
             });
 
-            // Apply sorting from _meta.json for each directory
             for (const [parentId, groupNodes] of Object.entries(nodesByParent)) {
-                const dirPath = parentId === 'root' ? this.contentPath : path.join(this.contentPath, parentId);
-                const metaPath = path.join(dirPath, '_meta.json');
+                for (const node of groupNodes) {
+                    const base = node.sourceRoot === 'drafts' ? this.draftsPath : this.contentPath;
+                    const nodeDir = parentId === 'root' ? base : path.join(base, parentId);
+                    const primaryMetaPath = path.join(nodeDir, '_meta.json');
+                    const legacyDraftMetaPath = path.join(nodeDir, '_draft_meta.json');
+                    let metaPath = primaryMetaPath;
+                    if (node.sourceRoot !== 'drafts' && node.draft && !(await fs.pathExists(primaryMetaPath))) {
+                        metaPath = legacyDraftMetaPath;
+                    }
 
-                if (await fs.pathExists(metaPath)) {
-                    try {
-                        const meta = await fs.readJson(metaPath);
-                        if (Array.isArray(meta)) {
-                            groupNodes.forEach(node => {
+                    if (await fs.pathExists(metaPath)) {
+                        try {
+                            const meta = await fs.readJson(metaPath);
+                            if (Array.isArray(meta)) {
                                 const simpleName = (node.fileName || node.title).replace(/\.md$/, '');
                                 const index = meta.indexOf(simpleName);
-                                node.sortIndex = index !== -1 ? index : 9999;
-                            });
+                                node.sortIndex = index !== -1
+                                    ? index + (node.draft ? 10000 : 0)
+                                    : (node.draft ? 19999 : 9999);
+                            }
+                        } catch (e) {
+                            console.error(`[ContentManager] Failed to read meta for ${parentId}:`, e);
                         }
-                    } catch (e) {
-                        console.error(`[ContentManager] Failed to read meta for ${parentId}:`, e);
+                    } else if (node.draft) {
+                        node.sortIndex = 19999;
                     }
                 }
             }
@@ -218,8 +203,8 @@ class ContentManager {
 
     startWatcher() {
         console.log('[ContentManager] Starting watcher...');
-        this.watcher = chokidar.watch(this.contentPath, {
-            ignored: /(^|[/\\])\../, // ignore dotfiles
+        this.watcher = chokidar.watch([this.contentPath, this.draftsPath], {
+            ignored: /(^|[/\\])node_modules([/\\])/, // ignore dependencies, but watch .rectowiki/drafts
             persistent: true,
             ignoreInitial: true
         });
@@ -247,7 +232,10 @@ class ContentManager {
         const publicPath = path.join(process.cwd(), 'public', 'content.json');
         const output = {
             config: this.config,
-            nodes: this.index
+            // The dev server is still a web surface. Never expose local drafts
+            // through its generated JSON, even when Electron is watching a
+            // content folder that contains private drafts.
+            nodes: this.index.filter(node => !node.draft)
         };
         try {
             await fs.writeJson(publicPath, output, { spaces: 2 });

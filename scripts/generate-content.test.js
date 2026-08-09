@@ -88,4 +88,19 @@ describe('generateContent', () => {
         expect(nodeB.sortIndex).toBe(0);
         expect(nodeA.sortIndex).toBe(1);
     });
+
+    it('should exclude draft pages from the publish artifact by default', async () => {
+        queueScan(['published.md', 'draft.md']);
+        fs.readFileSync.mockImplementation((filePath) => (
+            filePath.endsWith('draft.md')
+                ? '---\ntitle: Draft\ndraft: true\n---\nHidden'
+                : '---\ntitle: Published\ndraft: false\n---\nVisible'
+        ));
+
+        await generateContent(mockContentDir, mockOutputFile);
+
+        const output = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+        expect(output.nodes.some(node => node.id === 'draft')).toBe(false);
+        expect(output.nodes.some(node => node.id === 'published')).toBe(true);
+    });
 });

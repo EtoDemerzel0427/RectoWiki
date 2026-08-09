@@ -7,6 +7,7 @@ import fileAccess from './fileAccess.cjs';
 const {
     atomicWriteFile,
     createFileExclusive,
+    publishDraftFile,
     renameExclusive,
     resolveContentPath,
 } = fileAccess;
@@ -30,6 +31,13 @@ describe('file access boundary', () => {
         const root = await createTemporaryDirectory();
         expect(resolveContentPath(root, 'content/folder/note.md')).toBe(
             path.join(root, 'folder', 'note.md')
+        );
+    });
+
+    it('resolves local drafts beside the configured content root', async () => {
+        const root = await createTemporaryDirectory();
+        expect(resolveContentPath(root, 'drafts/folder/note.md')).toBe(
+            path.join(path.dirname(root), '.rectowiki', 'drafts', 'folder', 'note.md')
         );
     });
 
@@ -62,6 +70,19 @@ describe('file access boundary', () => {
 
         await expect(fs.readFile(target, 'utf8')).resolves.toBe('new');
         await expect(fs.readdir(root)).resolves.toEqual(['note.md']);
+    });
+
+    it('publishes a draft into content and removes the local source', async () => {
+        const root = await createTemporaryDirectory();
+        const draft = resolveContentPath(root, 'drafts/folder/note.md');
+        await fs.mkdir(path.dirname(draft), { recursive: true });
+        await fs.writeFile(draft, 'draft');
+
+        await expect(publishDraftFile(root, 'drafts/folder/note.md', 'published')).resolves.toBe(
+            'content/folder/note.md'
+        );
+        await expect(fs.readFile(path.join(root, 'folder', 'note.md'), 'utf8')).resolves.toBe('published');
+        await expect(fs.access(draft)).rejects.toThrow();
     });
 
     it('refuses to rename over an existing destination', async () => {

@@ -27,7 +27,7 @@ import Editor from './components/Editor';
 import Preview from './components/Preview';
 import Sidebar from './components/Sidebar';
 import Modal from './components/Modal';
-import { isElectron, readFile, writeFile } from './utils/fileSystem';
+import { isElectron, readFile, writeFile, publishDraft } from './utils/fileSystem';
 import { parseFrontmatter, stringifyFrontmatter } from './utils/frontmatter';
 import { useFileSystem } from './hooks/useFileSystem';
 
@@ -192,7 +192,8 @@ export default function App() {
     title: '',
     value: '',
     item: null, // For rename/delete/create context
-    parentId: null // Explicit parentId for creation
+    parentId: null, // Explicit parentId for creation
+    sourceRoot: 'drafts'
   });
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -253,6 +254,7 @@ export default function App() {
     let title = '';
     let value = '';
     let parentId = null;
+    const sourceRoot = 'drafts';
 
     // Determine parentId based on context
     if (type === 'createFile' || type === 'createDir') {
@@ -286,7 +288,8 @@ export default function App() {
       title,
       value,
       item,
-      parentId
+      parentId,
+      sourceRoot
     });
   };
 
@@ -295,13 +298,13 @@ export default function App() {
   };
 
   const handleModalConfirm = async () => {
-    const { type, value, item, parentId } = modalConfig;
+    const { type, value, item, parentId, sourceRoot } = modalConfig;
 
     try {
       if (type === 'createFile') {
-        await handleCreateFile(value, parentId);
+        await handleCreateFile(value, parentId, sourceRoot);
       } else if (type === 'createDir') {
-        await handleCreateDir(value, parentId);
+        await handleCreateDir(value, parentId, sourceRoot);
       } else if (type === 'rename') {
         const newId = await fsHandleRename(item, value);
         if (newId && activeNoteId === item.id) {
@@ -471,7 +474,12 @@ export default function App() {
           const content = await readFile(relativePath);
           if (!cancelled) setFileContent(content);
         } catch (error) {
-          console.error("Failed to load file content:", error);
+          // A publish move briefly removes the draft path before the watcher
+          // delivers the new content path. The current in-memory content is
+          // still valid during that short transition.
+          if (!error.message?.includes('ENOENT')) {
+            console.error("Failed to load file content:", error);
+          }
           // Fallback to what's in notes array if read fails?
           const note = notes.find(n => n.id === activeNoteId);
           if (!cancelled && note) setFileContent(note.content);
@@ -494,31 +502,33 @@ export default function App() {
     const note = notes.find(n => n.id === activeNoteId);
 
     try {
-      // 1. Write to file (Electron only)
-      if (isElectron()) {
-        let relativePath;
-        if (note && note.filePath) {
-          relativePath = note.filePath;
-        } else {
-          relativePath = `content/${activeNoteId}.md`;
-        }
-        await writeFile(relativePath, newContent);
-      } else {
-        // Browser mode save (no-op or local storage if implemented)
-      }
-
-      setFileContent(newContent);
-
       const { metadata } = parseFrontmatter(newContent);
       // Treat undefined as false (standard draft behavior)
       const targetDraft = metadata.draft !== undefined ? metadata.draft : false;
       const statusChanged = note && targetDraft !== note.draft;
 
+      // A local draft becomes a published note by moving out of the ignored
+      // drafts tree. The move happens only after the new content is ready.
+      const isLocalDraft = note?.sourceRoot === 'drafts';
+      if (isElectron()) {
+        const relativePath = note?.filePath || `content/${activeNoteId}.md`;
+        if (isLocalDraft && !targetDraft) {
+          await publishDraft(relativePath, newContent);
+          const fileName = (note.fileName || note.title).replace('.md', '');
+          await removeFromMeta(note.parentId, fileName, true, 'drafts');
+          await addToMeta(note.parentId, fileName, note.id, 'inside', false, 'content');
+        } else {
+          await writeFile(relativePath, newContent);
+        }
+      }
+
+      setFileContent(newContent);
+
       // Handle metadata migration if draft status changed
-      if (statusChanged && isElectron()) {
+      if (statusChanged && isElectron() && !(isLocalDraft && !targetDraft)) {
         const fileName = (note.fileName || note.title).replace('.md', '');
-        await removeFromMeta(note.parentId, fileName, note.draft);
-        await addToMeta(note.parentId, fileName, note.id, 'inside', targetDraft);
+        await removeFromMeta(note.parentId, fileName, note.draft, note.sourceRoot);
+        await addToMeta(note.parentId, fileName, note.id, 'inside', targetDraft, note.sourceRoot);
       }
 
       setNotes(prev => prev.map(n => {
@@ -693,11 +703,19 @@ export default function App() {
         {/* Desktop Sidebar Toggle */}
         <button
           onClick={() => setIsDesktopSidebarOpen(!isDesktopSidebarOpen)}
-          className="hidden md:flex absolute top-4 left-4 z-10 p-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm shadow-sm border border-slate-200 dark:border-slate-700 rounded-md text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+          className={`hidden md:flex absolute left-4 z-20 p-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm shadow-sm border border-slate-200 dark:border-slate-700 rounded-md text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all ${activeNote?.draft && isElectron() ? 'top-12' : 'top-4'}`}
           title={isDesktopSidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
         >
           {isDesktopSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
         </button>
+        {activeNote?.draft && isElectron() && (
+          <div className="pointer-events-none relative z-10 flex h-9 shrink-0 items-center justify-center gap-2 border-b border-indigo-100/80 bg-slate-50/95 px-4 text-xs font-medium text-slate-500 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-400">
+            <FileText size={13} className="text-indigo-500 dark:text-indigo-400" />
+            {activeNote.sourceRoot === 'drafts'
+              ? <><span className="text-slate-700 dark:text-slate-200">Local draft</span><span className="text-slate-400 dark:text-slate-500">· not published · uncheck Draft and save to publish</span></>
+              : <><span className="text-slate-700 dark:text-slate-200">Draft preview</span><span className="text-slate-400 dark:text-slate-500">· hidden on web · still present in the repository</span></>}
+          </div>
+        )}
         {activeNote ? (
           <>
             {isEditMode && isElectron() ? (
@@ -726,11 +744,7 @@ export default function App() {
                 <div className="flex-1 h-full overflow-hidden">
                   <Editor
                     content={fileContent}
-                    filePath={
-                      activeNote.parentId
-                        ? `content/${activeNote.parentId}/${activeNote.fileName}`
-                        : `content/${activeNote.fileName}`
-                    }
+                    filePath={activeNote.filePath}
                     onSave={handleSaveContent}
                     onChange={(newContent) => {
                       setFileContent(newContent);
@@ -744,11 +758,7 @@ export default function App() {
                 {isEditMode ? (
                   <Editor
                     content={fileContent}
-                    filePath={
-                      activeNote.parentId
-                        ? `content/${activeNote.parentId}/${activeNote.fileName}`
-                        : `content/${activeNote.fileName}`
-                    }
+                    filePath={activeNote.filePath}
                     onSave={handleSaveContent}
                     onChange={(newContent) => {
                       setFileContent(newContent);

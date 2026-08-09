@@ -172,4 +172,28 @@ Content`);
             title: 'Safe title'
         });
     });
+
+    it('overlays a local draft on the published note with the same path', async () => {
+        mocks.glob
+            .mockResolvedValueOnce(['folder/note.md'])
+            .mockResolvedValueOnce(['folder/'])
+            .mockResolvedValueOnce(['folder/note.md'])
+            .mockResolvedValueOnce(['folder/']);
+        fs.pathExists.mockImplementation(async (target) => target.endsWith('.rectowiki/drafts'));
+        fs.readFile.mockImplementation(async (target) => target.includes('.rectowiki/drafts')
+            ? '---\ntitle: Draft Note\ndraft: true\n---\nDraft body'
+            : '---\ntitle: Published Note\ndraft: false\n---\nPublished body');
+
+        await contentManager.initialize(mockContentPath);
+
+        expect(contentManager.index).toHaveLength(2); // one folder plus the overlaid note
+        const note = contentManager.index.find(node => !node.isFolder);
+        expect(note).toMatchObject({
+            id: 'folder/note',
+            filePath: 'drafts/folder/note.md',
+            sourceRoot: 'drafts',
+            draft: true,
+            title: 'Draft Note'
+        });
+    });
 });

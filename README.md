@@ -95,7 +95,7 @@ Generate the browser-readable content index and build the static site with:
 npm run build
 ```
 
-In desktop mode, RectoWiki watches the selected content directory and reflects file changes automatically.
+In desktop mode, RectoWiki watches the selected content directory and reflects file changes automatically. New pages are created as local drafts under the sibling `.rectowiki/drafts/` directory. Drafts are shown in the desktop app with a `Draft` badge and can be previewed normally, but they are not copied to a static deployment. Uncheck **Draft** and save to move a draft into `content/` and make it eligible for publishing.
 
 ## Desktop app
 
@@ -116,7 +116,9 @@ Artifacts are written to `dist_electron/`. Release tags matching `v*` trigger th
 1. Fork this repository and place your Markdown files in `content/`.
 2. In the repository settings, choose **GitHub Actions** as the Pages source.
 3. Push to `main`. The included workflow generates the content index, builds the site, and deploys `dist/`.
-4. Optionally point the desktop app's **Content Location** setting at that same `content/` folder, then commit and push when you want to publish local edits.
+4. Point the desktop app's **Content Location** setting at that same `content/` folder. Local drafts live beside it in `.rectowiki/drafts/`, which is ignored by Git; commit and push only when you want to publish local edits.
+
+The `draft: true` frontmatter flag is also filtered during static generation as a second safety boundary. A draft that is accidentally left under `content/` will still be excluded from the published `content.json`, but files committed to a public repository remain visible in Git history.
 
 For Netlify or Vercel, use `npm run build` as the build command and `dist` as the output directory.
 
@@ -138,6 +140,7 @@ For Netlify or Vercel, use `npm run build` as the build command and `dist` as th
 ```text
 RectoWiki/
 ├── content/                 # Markdown notes and wiki configuration
+├── .rectowiki/drafts/       # Local-only drafts (ignored by Git)
 ├── docs/images/             # README screenshots
 ├── electron/                # Desktop main process and content watcher
 ├── public/

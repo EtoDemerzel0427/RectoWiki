@@ -5,6 +5,7 @@ const { promises: fsPromises } = fs;
 const {
     atomicWriteFile,
     createFileExclusive,
+    publishDraftFile,
     renameExclusive,
     resolveContentPath,
 } = require('./fileAccess.cjs');
@@ -145,8 +146,8 @@ function createWindow() {
     configureNavigationSecurity(win);
     Menu.setApplicationMenu(buildApplicationMenu(win));
 
-    win.webContents.on('console-message', (_event, _level, message) => {
-        console.log(`[Renderer] ${message}`);
+    win.webContents.on('console-message', (details) => {
+        console.log(`[Renderer] ${details.message}`);
     });
 
     win.on('closed', () => {
@@ -228,7 +229,7 @@ const registerIpcHandlers = () => {
     ipcMain.handle('create-dir', async (event, dirPath) => {
         try {
             assertTrustedSender(event);
-            await fsPromises.mkdir(getRequestedPath(dirPath));
+            await fsPromises.mkdir(getRequestedPath(dirPath), { recursive: true });
             return { success: true };
         } catch (error) {
             return { success: false, error: error.message };
@@ -241,6 +242,17 @@ const registerIpcHandlers = () => {
             await renameExclusive(getRequestedPath(oldPath), getRequestedPath(newPath));
             return { success: true };
         } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('publish-draft', async (event, draftPath, content) => {
+        try {
+            assertTrustedSender(event);
+            const filePath = await publishDraftFile(contentManager.contentPath, draftPath, content);
+            return { success: true, filePath };
+        } catch (error) {
+            console.error(`[Main] Publish failed: ${error.message}`);
             return { success: false, error: error.message };
         }
     });

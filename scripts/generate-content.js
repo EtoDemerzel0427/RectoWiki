@@ -3,9 +3,10 @@ import path from 'path';
 import { glob } from 'glob';
 import { parseFrontmatter } from '../electron/frontmatter.mjs';
 
-export async function generateContent(customContentDir, customOutputFile) {
+export async function generateContent(customContentDir, customOutputFile, options = {}) {
     const CONTENT_DIR = customContentDir || path.join(process.cwd(), 'content');
     const OUTPUT_FILE = customOutputFile || path.join(process.cwd(), 'public', 'content.json');
+    const includeDrafts = options.includeDrafts === true;
 
     const files = await glob('**/*.md', { cwd: CONTENT_DIR });
     const dirs = await glob('**/', { cwd: CONTENT_DIR }); // Scan for directories
@@ -24,6 +25,10 @@ export async function generateContent(customContentDir, customOutputFile) {
         const filePath = path.join(CONTENT_DIR, file);
         const source = fs.readFileSync(filePath, 'utf8');
         const { metadata: data } = parseFrontmatter(source);
+
+        // Drafts are useful in the desktop app, but must never be published by
+        // the static build unless the caller explicitly opts in.
+        if (!includeDrafts && data.draft === true) return;
 
         // Normalize ID: replace backslashes, remove extension
         const id = file.replace(/\\/g, '/').replace(/\.md$/, '');

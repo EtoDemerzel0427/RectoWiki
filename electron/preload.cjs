@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteFile: (path) => ipcRenderer.invoke('delete-file', path),
     createDir: (path) => ipcRenderer.invoke('create-dir', path),
     renamePath: (oldPath, newPath) => ipcRenderer.invoke('rename-path', oldPath, newPath),
+    publishDraft: (draftPath, content) => ipcRenderer.invoke('publish-draft', draftPath, content),
     runGenerator: () => ipcRenderer.invoke('run-generator'),
     getContent: () => ipcRenderer.invoke('get-content'),
     onContentUpdated: (callback) => {
