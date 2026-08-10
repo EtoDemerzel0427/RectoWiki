@@ -7,17 +7,22 @@ import fileAccess from './fileAccess.cjs';
 const {
     atomicWriteFile,
     createFileExclusive,
+    listTrashItems,
+    moveToTrash,
     publishDraftFile,
     renameExclusive,
+    restoreTrashItem,
     resolveContentPath,
 } = fileAccess;
 
 const temporaryDirectories = [];
 
 const createTemporaryDirectory = async () => {
-    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'rectowiki-file-access-'));
-    temporaryDirectories.push(directory);
-    return directory;
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'rectowiki-file-access-'));
+    const contentDirectory = path.join(workspace, 'content');
+    await fs.mkdir(contentDirectory);
+    temporaryDirectories.push(workspace);
+    return contentDirectory;
 };
 
 afterEach(async () => {
@@ -95,5 +100,40 @@ describe('file access boundary', () => {
         await expect(renameExclusive(source, destination)).rejects.toMatchObject({ code: 'EEXIST' });
         await expect(fs.readFile(source, 'utf8')).resolves.toBe('source');
         await expect(fs.readFile(destination, 'utf8')).resolves.toBe('destination');
+    });
+
+    it('moves a note to recoverable trash and restores it to its original path', async () => {
+        const root = await createTemporaryDirectory();
+        const source = path.join(root, 'folder', 'note.md');
+        await fs.mkdir(path.dirname(source), { recursive: true });
+        await fs.writeFile(source, 'recover me');
+
+        const entry = await moveToTrash(root, 'content/folder/note.md', {
+            title: 'Recoverable note',
+            parentId: 'folder',
+        });
+
+        await expect(fs.access(source)).rejects.toThrow();
+        await expect(listTrashItems(root)).resolves.toEqual([expect.objectContaining({
+            id: entry.id,
+            originalPath: 'content/folder/note.md',
+            title: 'Recoverable note',
+        })]);
+
+        await expect(restoreTrashItem(root, entry.id)).resolves.toMatchObject({ id: entry.id });
+        await expect(fs.readFile(source, 'utf8')).resolves.toBe('recover me');
+        await expect(listTrashItems(root)).resolves.toEqual([]);
+    });
+
+    it('does not overwrite an existing file when restoring from trash', async () => {
+        const root = await createTemporaryDirectory();
+        const source = path.join(root, 'note.md');
+        await fs.writeFile(source, 'original');
+        const entry = await moveToTrash(root, 'content/note.md');
+        await fs.writeFile(source, 'replacement');
+
+        await expect(restoreTrashItem(root, entry.id)).rejects.toMatchObject({ code: 'EEXIST' });
+        await expect(fs.readFile(source, 'utf8')).resolves.toBe('replacement');
+        await expect(listTrashItems(root)).resolves.toHaveLength(1);
     });
 });

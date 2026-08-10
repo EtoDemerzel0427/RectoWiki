@@ -15,8 +15,74 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    name: Check release state
+    runs-on: ubuntu-latest
+    outputs:
+      should-build: ${{ steps.release-state.outputs.should-build }}
+    steps:
+      - name: Skip a duplicate completed release run
+        id: release-state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          SHOULD_BUILD=true
+          ASSETS="$(gh release view "$TAG" --repo "$REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+
+          HAS_DMG=false
+          HAS_APPIMAGE=false
+          HAS_EXE=false
+          while IFS= read -r ASSET; do
+            case "$ASSET" in
+              *.dmg) HAS_DMG=true ;;
+              *.AppImage) HAS_APPIMAGE=true ;;
+              *.exe) HAS_EXE=true ;;
+            esac
+          done <<< "$ASSETS"
+
+          if [ "$HAS_DMG" = true ] && [ "$HAS_APPIMAGE" = true ] && [ "$HAS_EXE" = true ]; then
+            SHOULD_BUILD=false
+            echo "Release $TAG already has macOS, Linux, and Windows installers; skipping duplicate run."
+          fi
+
+          echo "should-build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
+
+  quality:
+    name: Test release source
+    needs: prepare
+    if: needs.prepare.outputs.should-build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Verify web build
+        run: npm run build
+
   build:
     name: Build ${{ matrix.name }}
+    needs: [prepare, quality]
+    if: needs.prepare.outputs.should-build == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -30,7 +96,7 @@ jobs:
             os: windows-latest
 
     steps:
-      - name: Check out Git repository
+      - name: Check out tagged source
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.release.tag_name || github.ref }}
@@ -54,10 +120,7 @@ jobs:
           npm version "$VERSION" --no-git-tag-version
 
       - name: Build application
-        run: |
-          npm run gen-content
-          npm run build
-          npx electron-builder --publish never
+        run: npm run electron:release
 
       - name: Upload platform artifacts
         uses: actions/upload-artifact@v4
@@ -73,7 +136,8 @@ jobs:
 
   publish:
     name: Publish release assets
-    needs: build
+    needs: [prepare, build]
+    if: needs.prepare.outputs.should-build == 'true' && needs.build.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -119,6 +183,7 @@ jobs:
             --clobber \
             "${ASSETS[@]}"
 
-          gh release edit "$TAG" \
-            --repo "$REPOSITORY" \
-            --draft=false
+          IS_DRAFT="$(gh release view "$TAG" --repo "$REPOSITORY" --json isDraft --jq '.isDraft')"
+          if [ "$IS_DRAFT" = true ]; then
+            gh release edit "$TAG" --repo "$REPOSITORY" --draft=false
+          fi

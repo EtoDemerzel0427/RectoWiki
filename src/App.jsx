@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useEffectEvent } from 'react';
+import React, { useState, useMemo, useEffect, useEffectEvent, useRef } from 'react';
 import {
   Search,
   Menu,
@@ -21,15 +21,18 @@ import {
   Eye,
   Type,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  RotateCcw,
+  Trash2
 } from 'lucide-react';
-import Editor from './components/Editor';
 import Preview from './components/Preview';
 import Sidebar from './components/Sidebar';
 import Modal from './components/Modal';
-import { isElectron, readFile, writeFile, publishDraft } from './utils/fileSystem';
+import { isElectron, listTrashItems, readFile, writeFile, publishDraft } from './utils/fileSystem';
 import { parseFrontmatter, stringifyFrontmatter } from './utils/frontmatter';
 import { useFileSystem } from './hooks/useFileSystem';
+
+const Editor = React.lazy(() => import('./components/Editor'));
 
 // --- 工具函数：构建树形结构 ---
 const buildTree = (items) => {
@@ -103,7 +106,10 @@ export default function App() {
     wikiConfig,
     saveConfig,
     addToMeta,
-    removeFromMeta
+    removeFromMeta,
+    handleRestore,
+    searchIndex,
+    loadSearchIndex
   } = useFileSystem();
 
   const [activeNoteId, setActiveNoteId] = useState(null);
@@ -116,11 +122,13 @@ export default function App() {
   // const [loading, setLoading] = useState(true); // Handled by hook
   const [isEditMode, setIsEditMode] = useState(false);
   const [fileContent, setFileContent] = useState(''); // Store fresh content from disk
+  const pageCacheRef = useRef(new Map());
   const [isAutoSaveEnabled, setIsAutoSaveEnabled] = useState(false);
 
   // Split View State
   const [splitRatio, setSplitRatio] = useState(0.5);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
+  const [editorSelection, setEditorSelection] = useState(null);
 
   // Auto-Save Effect
   useEffect(() => {
@@ -197,6 +205,9 @@ export default function App() {
   });
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
+  const [trashItems, setTrashItems] = useState([]);
+  const [restoringTrashId, setRestoringTrashId] = useState(null);
   const [settingsTitle, setSettingsTitle] = useState('');
   const [settingsFontTheme, setSettingsFontTheme] = useState('');
   const [settingsFontSize, setSettingsFontSize] = useState('base');
@@ -217,6 +228,27 @@ export default function App() {
     setSettingsFontSize(wikiConfig?.fontSize || 'base');
     setSettingsHomePageId(wikiConfig?.homePageId || '');
     setIsSettingsOpen(true);
+  };
+
+  const handleOpenTrash = async () => {
+    try {
+      setTrashItems(await listTrashItems());
+      setIsTrashOpen(true);
+    } catch (error) {
+      alert(`Failed to open Trash: ${error.message}`);
+    }
+  };
+
+  const restoreFromTrash = async (trashId) => {
+    setRestoringTrashId(trashId);
+    try {
+      const restored = await handleRestore(trashId);
+      if (restored) {
+        setTrashItems(items => items.filter(item => item.id !== trashId));
+      }
+    } finally {
+      setRestoringTrashId(null);
+    }
   };
 
   // Content Path State (Electron only)
@@ -278,7 +310,7 @@ export default function App() {
         value = item.title;
         break;
       case 'delete':
-        title = 'Delete Item';
+        title = 'Move to Trash';
         break;
     }
 
@@ -311,7 +343,11 @@ export default function App() {
           setActiveNoteId(newId);
         }
       } else if (type === 'delete') {
-        await handleDelete(item);
+        const trashed = await handleDelete(item);
+        if (trashed && (activeNoteId === item.id || activeNoteId?.startsWith(`${item.id}/`))) {
+          setActiveNoteId(null);
+          setFileContent('');
+        }
       }
       closeModal();
     } catch (error) {
@@ -407,7 +443,6 @@ export default function App() {
 
     if (targetNote) {
       // This effect resolves external URL/content state into the selected note.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveNoteId(targetNote.id);
       // Ensure hash matches
       if (targetNote.slug && hash !== targetNote.slug) {
@@ -485,9 +520,35 @@ export default function App() {
           if (!cancelled && note) setFileContent(note.content);
         }
       } else if (activeNoteId) {
-        // Browser mode: use the content from content.json
         const note = notes.find(n => n.id === activeNoteId);
-        if (!cancelled && note) setFileContent(note.content);
+        if (!note || cancelled) return;
+
+        // Older artifacts embedded the body in content.json. New builds keep
+        // only navigation metadata there and fetch the selected page on demand.
+        if (typeof note.content === 'string') {
+          setFileContent(note.content);
+          return;
+        }
+
+        if (!note.pagePath) {
+          setFileContent('');
+          return;
+        }
+
+        try {
+          let content = pageCacheRef.current.get(note.pagePath);
+          if (content === undefined) {
+            const response = await fetch(`${import.meta.env.BASE_URL}${note.pagePath}`);
+            if (!response.ok) throw new Error(`Failed to load ${note.pagePath}`);
+            const payload = await response.json();
+            content = payload.content || '';
+            pageCacheRef.current.set(note.pagePath, content);
+          }
+          if (!cancelled) setFileContent(content);
+        } catch (error) {
+          console.error('Failed to load page content:', error);
+          if (!cancelled) setFileContent('');
+        }
       }
     };
     void loadContent();
@@ -596,6 +657,10 @@ export default function App() {
     return notes.filter(n => !n.draft);
   }, [notes]);
 
+  useEffect(() => {
+    if (searchQuery && !isElectron()) void loadSearchIndex();
+  }, [searchQuery, loadSearchIndex]);
+
   // 构建树
   const treeData = useMemo(() => buildTree(filteredNotes), [filteredNotes]);
 
@@ -636,14 +701,22 @@ export default function App() {
 
       const q = searchQuery.toLowerCase();
       const matchesTag = selectedTag ? note.tags?.includes(selectedTag) : true;
+      const searchableContent = note.content || searchIndex[note.id] || '';
       const matchesSearch = !q || (
         (note.title || '').toLowerCase().includes(q) ||
-        (note.content || '').toLowerCase().includes(q)
+        searchableContent.toLowerCase().includes(q)
       );
 
       return matchesTag && matchesSearch;
     });
-  }, [searchQuery, selectedTag, filteredNotes]);
+  }, [searchQuery, selectedTag, filteredNotes, searchIndex]);
+
+  const searchableFilteredNotes = useMemo(() => (
+    flatFilteredNotes?.map(note => ({
+      ...note,
+      content: note.content || searchIndex[note.id] || ''
+    })) || null
+  ), [flatFilteredNotes, searchIndex]);
 
   const activeNote = notes.find(n => n.id === activeNoteId);
 
@@ -685,7 +758,7 @@ export default function App() {
         isMobileMenuOpen={isMobileMenuOpen}
         darkMode={darkMode}
         setDarkMode={setDarkMode}
-        flatFilteredNotes={flatFilteredNotes}
+        flatFilteredNotes={searchableFilteredNotes}
         onCreateFile={(item) => openModal('createFile', item)}
         onCreateDir={(item) => openModal('createDir', item)}
         onDelete={(item) => openModal('delete', item)}
@@ -694,6 +767,7 @@ export default function App() {
         onMove={handleMove}
         wikiTitle={wikiConfig?.title || "RectoWiki"}
         onOpenSettings={handleOpenSettings}
+        onOpenTrash={handleOpenTrash}
         isDesktopSidebarOpen={isDesktopSidebarOpen}
       />
 
@@ -732,6 +806,9 @@ export default function App() {
                     selectedTag={selectedTag}
                     onTagClick={setSelectedTag}
                     fontSize={effectiveFontSize}
+                    onSourceSelect={({ start, end }) => {
+                      setEditorSelection({ start, end, requestId: Date.now() });
+                    }}
                   />
                 </div>
 
@@ -742,29 +819,34 @@ export default function App() {
                 />
 
                 <div className="flex-1 h-full overflow-hidden">
-                  <Editor
-                    content={fileContent}
-                    filePath={activeNote.filePath}
-                    onSave={handleSaveContent}
-                    onChange={(newContent) => {
-                      setFileContent(newContent);
-                    }}
-                    fontSize={effectiveFontSize}
-                  />
+                  <React.Suspense fallback={<div className="h-full grid place-items-center text-sm text-slate-400">Loading editor…</div>}>
+                    <Editor
+                      content={fileContent}
+                      filePath={activeNote.filePath}
+                      onSave={handleSaveContent}
+                      onChange={(newContent) => {
+                        setFileContent(newContent);
+                      }}
+                      fontSize={effectiveFontSize}
+                      selectionRequest={editorSelection}
+                    />
+                  </React.Suspense>
                 </div>
               </div>
             ) : (
               <div className="flex-1 overflow-y-auto custom-scrollbar">
                 {isEditMode ? (
-                  <Editor
-                    content={fileContent}
-                    filePath={activeNote.filePath}
-                    onSave={handleSaveContent}
-                    onChange={(newContent) => {
-                      setFileContent(newContent);
-                    }}
-                    fontSize={effectiveFontSize}
-                  />
+                  <React.Suspense fallback={<div className="h-full grid place-items-center text-sm text-slate-400">Loading editor…</div>}>
+                    <Editor
+                      content={fileContent}
+                      filePath={activeNote.filePath}
+                      onSave={handleSaveContent}
+                      onChange={(newContent) => {
+                        setFileContent(newContent);
+                      }}
+                      fontSize={effectiveFontSize}
+                    />
+                  </React.Suspense>
                 ) : (
                   <Preview
                     content={fileContent}
@@ -877,19 +959,51 @@ export default function App() {
         </div>
       </Modal>
 
+      <Modal
+        isOpen={isTrashOpen}
+        onClose={() => setIsTrashOpen(false)}
+        title="Recently Deleted"
+        onConfirm={() => setIsTrashOpen(false)}
+        confirmText="Done"
+      >
+        <div className="space-y-3 max-h-[55vh] overflow-y-auto custom-scrollbar">
+          {trashItems.length === 0 ? (
+            <div className="py-8 text-center text-sm text-slate-400">
+              <Trash2 size={28} className="mx-auto mb-3 opacity-60" />
+              Trash is empty.
+            </div>
+          ) : trashItems.map(item => (
+            <div key={item.id} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-700 p-3">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.title}</div>
+                <div className="truncate text-xs text-slate-400">{item.originalPath}</div>
+                <div className="mt-1 text-[11px] text-slate-400">{new Date(item.deletedAt).toLocaleString()}</div>
+              </div>
+              <button
+                onClick={() => void restoreFromTrash(item.id)}
+                disabled={restoringTrashId === item.id}
+                className="flex items-center gap-1.5 rounded-md border border-indigo-200 px-2.5 py-1.5 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-50 disabled:opacity-50 dark:border-indigo-800 dark:text-indigo-400 dark:hover:bg-indigo-950/40"
+              >
+                <RotateCcw size={13} />
+                {restoringTrashId === item.id ? 'Restoring…' : 'Restore'}
+              </button>
+            </div>
+          ))}
+        </div>
+      </Modal>
+
       {/* Modal */}
       < Modal
         isOpen={modalConfig.isOpen}
         onClose={closeModal}
         title={modalConfig.title}
         onConfirm={handleModalConfirm}
-        confirmText={modalConfig.type === 'delete' ? 'Delete' : 'Confirm'}
-        isDestructive={modalConfig.type === 'delete'}
+        confirmText={modalConfig.type === 'delete' ? 'Move to Trash' : 'Confirm'}
       >
         {
           modalConfig.type === 'delete' ? (
             <p className="text-slate-600 dark:text-slate-300">
-              Are you sure you want to delete <span className="font-semibold">{modalConfig.item?.title}</span>? This action cannot be undone.
+              Move <span className="font-semibold">{modalConfig.item?.title}</span> to Trash? You can restore it later from Recently Deleted.
             </p>
           ) : (
             <div className="flex flex-col gap-2">

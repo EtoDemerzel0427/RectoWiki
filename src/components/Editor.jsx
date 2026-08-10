@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Save, Search, ChevronUp, ChevronDown, X } from 'lucide-react';
 import { parseFrontmatter, stringifyFrontmatter } from '../utils/frontmatter';
+import {
+    createEditorHistory,
+    getLineSelection,
+    moveEditorHistory,
+    normalizeEditorMetadata,
+    pushEditorHistory,
+    wrapTextSelection,
+} from '../utils/editorState';
 
-const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
+const Editor = ({ content, filePath, onSave, onChange, fontSize, selectionRequest }) => {
     const [body, setBody] = useState(() => parseFrontmatter(content || '').body);
     const [metadata, setMetadata] = useState(() => {
         const { metadata: parsedMeta } = parseFrontmatter(content || '');
-        return {
-            ...parsedMeta,
-            title: parsedMeta.title || '',
-            date: parsedMeta.date || new Date().toISOString().split('T')[0],
-            tags: parsedMeta.tags || '',
-            category: parsedMeta.category || '',
-            draft: parsedMeta.draft || false
-        };
+        return normalizeEditorMetadata(parsedMeta);
     });
 
     // Search State
@@ -32,28 +33,42 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
     const lastEmittedContent = useRef(content);
     const textareaRef = useRef(null);
     const searchInputRef = useRef(null);
+    const bodyRef = useRef(body);
+    const lastFilePathRef = useRef(filePath);
+    const historyRef = useRef({ snapshots: [], index: -1 });
+
+    const resetHistory = useCallback((nextMetadata, nextBody) => {
+        historyRef.current = createEditorHistory(nextMetadata, nextBody);
+    }, []);
+
+    useEffect(() => {
+        bodyRef.current = body;
+    }, [body]);
 
     // Initial load and external updates
     useEffect(() => {
-        if (content !== lastEmittedContent.current) {
+        const fileChanged = filePath !== lastFilePathRef.current;
+        if (fileChanged || content !== lastEmittedContent.current) {
             const { metadata: parsedMeta, body: parsedBody } = parseFrontmatter(content || '');
+            const nextMetadata = normalizeEditorMetadata(parsedMeta);
 
             // This controlled editor must resynchronize when another file is loaded.
             // eslint-disable-next-line react-hooks/set-state-in-effect
             setBody(parsedBody);
-            setMetadata(prev => ({
-                ...prev,
-                ...parsedMeta,
-                title: parsedMeta.title || prev.title || '',
-                date: parsedMeta.date || prev.date || new Date().toISOString().split('T')[0],
-                tags: parsedMeta.tags || prev.tags || '',
-                category: parsedMeta.category || prev.category || '',
-                draft: parsedMeta.draft !== undefined ? parsedMeta.draft : prev.draft
-            }));
+            setMetadata(nextMetadata);
+            bodyRef.current = parsedBody;
+            resetHistory(nextMetadata, parsedBody);
 
             lastEmittedContent.current = content;
+            lastFilePathRef.current = filePath;
         }
-    }, [content]);
+    }, [content, filePath, resetHistory]);
+
+    useEffect(() => {
+        if (historyRef.current.index === -1) {
+            resetHistory(metadata, body);
+        }
+    }, [body, metadata, resetHistory]);
 
     // Emit changes to parent
     const emitChange = (newMeta, newBody) => {
@@ -66,15 +81,38 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
         }
     };
 
+    const commitSnapshot = (nextMetadata, nextBody) => {
+        if (historyRef.current.index === -1) {
+            resetHistory(metadata, body);
+        }
+
+        const nextSnapshot = { metadata: nextMetadata, body: nextBody };
+        const nextHistory = pushEditorHistory(historyRef.current, nextSnapshot);
+        if (nextHistory === historyRef.current) return;
+        historyRef.current = nextHistory;
+
+        setMetadata(nextMetadata);
+        setBody(nextBody);
+        bodyRef.current = nextBody;
+        emitChange(nextMetadata, nextBody);
+    };
+
     const updateMetadata = (field, value) => {
         const newMeta = { ...metadata, [field]: value };
-        setMetadata(newMeta);
-        emitChange(newMeta, body);
+        if (isComposing.current) {
+            setMetadata(newMeta);
+            return;
+        }
+        commitSnapshot(newMeta, body);
     };
 
     const updateBody = (value) => {
-        setBody(value);
-        emitChange(metadata, value);
+        if (isComposing.current) {
+            setBody(value);
+            bodyRef.current = value;
+            return;
+        }
+        commitSnapshot(metadata, value);
     };
 
     const handleCompositionStart = () => {
@@ -112,54 +150,138 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
 
         const start = textarea.selectionStart;
         const end = textarea.selectionEnd;
-        const selectedText = body.substring(start, end);
-        const newText = body.substring(0, start) + wrapper + selectedText + wrapper + body.substring(end);
+        const wrapped = wrapTextSelection(body, start, end, wrapper);
 
-        updateBody(newText);
+        updateBody(wrapped.body);
 
         // Restore cursor position/selection after React render cycle
         setTimeout(() => {
             textarea.focus();
-            textarea.setSelectionRange(start + wrapper.length, end + wrapper.length);
+            textarea.setSelectionRange(wrapped.selectionStart, wrapped.selectionEnd);
         }, 0);
     };
 
-    // Scroll Helper using Mirror Div
+    const applyHistorySnapshot = (snapshot) => {
+        setMetadata(snapshot.metadata);
+        setBody(snapshot.body);
+        bodyRef.current = snapshot.body;
+        emitChange(snapshot.metadata, snapshot.body);
+
+        requestAnimationFrame(() => {
+            const textarea = textareaRef.current;
+            if (!textarea) return;
+            textarea.focus({ preventScroll: true });
+            const cursor = Math.min(snapshot.body.length, textarea.value.length);
+            textarea.setSelectionRange(cursor, cursor);
+        });
+    };
+
+    const undo = () => {
+        const result = moveEditorHistory(historyRef.current, 'undo');
+        if (!result.snapshot) return;
+        historyRef.current = result.history;
+        applyHistorySnapshot(result.snapshot);
+    };
+
+    const redo = () => {
+        const result = moveEditorHistory(historyRef.current, 'redo');
+        if (!result.snapshot) return;
+        historyRef.current = result.history;
+        applyHistorySnapshot(result.snapshot);
+    };
+
+    // Electron menu clicks originate in the main process. Keyboard accelerators
+    // stay renderer-owned so they cannot bypass this controlled history.
+    useEffect(() => {
+        const subscribe = window.electronAPI?.onEditorCommand;
+        if (!subscribe) return undefined;
+
+        return subscribe((command) => {
+            if (command === 'undo') undo();
+            if (command === 'redo') redo();
+        });
+    });
+
+    // Scroll Helper using a text-layout mirror with the textarea's width.
     const scrollToMatch = (textarea, index) => {
         if (!textarea) return;
 
         const div = document.createElement('div');
         const style = window.getComputedStyle(textarea);
+        const mirroredProperties = [
+            'boxSizing',
+            'fontFamily',
+            'fontSize',
+            'fontStyle',
+            'fontVariant',
+            'fontWeight',
+            'letterSpacing',
+            'lineHeight',
+            'paddingTop',
+            'paddingRight',
+            'paddingBottom',
+            'paddingLeft',
+            'borderTopWidth',
+            'borderRightWidth',
+            'borderBottomWidth',
+            'borderLeftWidth',
+            'textIndent',
+            'textTransform',
+            'tabSize',
+            'wordSpacing'
+        ];
 
-        // Copy styles
-        Array.from(style).forEach((prop) => {
-            div.style.setProperty(prop, style.getPropertyValue(prop), style.getPropertyPriority(prop));
+        mirroredProperties.forEach((property) => {
+            div.style[property] = style[property];
         });
 
         div.style.position = 'absolute';
-        div.style.top = '-9999px';
+        div.style.top = '0';
         div.style.left = '-9999px';
         div.style.visibility = 'hidden';
         div.style.height = 'auto';
-        div.style.overflow = 'hidden';
+        div.style.minHeight = '0';
+        div.style.maxHeight = 'none';
+        div.style.width = `${textarea.clientWidth}px`;
+        div.style.overflow = 'visible';
+        div.style.whiteSpace = 'pre-wrap';
+        div.style.wordBreak = 'break-word';
+        div.style.overflowWrap = 'break-word';
 
-        // Content up to match
-        const content = textarea.value.substring(0, index);
-        div.textContent = content;
-
-        // Handle trailing newline
-        if (content.endsWith('\n')) {
-            div.textContent += '\u200b'; // Zero-width space
-        }
+        const before = document.createElement('span');
+        before.textContent = textarea.value.substring(0, index);
+        const marker = document.createElement('span');
+        marker.textContent = '\u200b';
+        div.append(before, marker);
 
         document.body.appendChild(div);
-        const height = div.clientHeight;
+        const markerTop = marker.offsetTop;
+        const lineHeight = Number.parseFloat(style.lineHeight)
+            || Number.parseFloat(style.fontSize) * 1.5
+            || 20;
         document.body.removeChild(div);
 
-        // Scroll
-        // Center it: scrollTop = height - (textareaHeight / 2)
-        textarea.scrollTop = height - (textarea.clientHeight / 2);
+        textarea.scrollTop = Math.max(
+            0,
+            markerTop - (textarea.clientHeight / 2) + (lineHeight / 2)
+        );
     };
+
+    useEffect(() => {
+        if (!selectionRequest || !textareaRef.current) return;
+
+        const textarea = textareaRef.current;
+        const currentBody = bodyRef.current;
+        const { start, end } = getLineSelection(currentBody, selectionRequest.start);
+
+        const frame = requestAnimationFrame(() => {
+            textarea.focus({ preventScroll: true });
+            textarea.setSelectionRange(start, end);
+            scrollToMatch(textarea, start);
+        });
+
+        return () => cancelAnimationFrame(frame);
+    }, [selectionRequest]);
 
     const performSearch = (direction = 'next') => {
         if (!searchQuery || !textareaRef.current) return;
@@ -223,6 +345,20 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize }) => {
                     e.preventDefault();
                     setShowSearch(true);
                     setTimeout(() => searchInputRef.current?.focus(), 0);
+                    break;
+                case 'z':
+                    e.preventDefault();
+                    if (e.shiftKey) {
+                        redo();
+                    } else {
+                        undo();
+                    }
+                    break;
+                case 'y':
+                    if (e.ctrlKey && !e.metaKey) {
+                        e.preventDefault();
+                        redo();
+                    }
                     break;
             }
         }

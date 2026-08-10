@@ -5,10 +5,14 @@ const { promises: fsPromises } = fs;
 const {
     atomicWriteFile,
     createFileExclusive,
+    listTrashItems,
+    moveToTrash,
     publishDraftFile,
     renameExclusive,
+    restoreTrashItem,
     resolveContentPath,
 } = require('./fileAccess.cjs');
+const { createEditorHistoryMenuItems } = require('./editorCommands.cjs');
 
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const DEV_SERVER_URL = 'http://127.0.0.1:5173/';
@@ -106,8 +110,7 @@ const buildApplicationMenu = (win) => Menu.buildFromTemplate([
     {
         label: 'Edit',
         submenu: [
-            { role: 'undo' },
-            { role: 'redo' },
+            ...createEditorHistoryMenuItems(win.webContents),
             { type: 'separator' },
             { role: 'cut' },
             { role: 'copy' },
@@ -216,11 +219,30 @@ const registerIpcHandlers = () => {
         }
     });
 
-    ipcMain.handle('delete-file', async (event, filePath) => {
+    ipcMain.handle('trash-item', async (event, filePath, details) => {
         try {
             assertTrustedSender(event);
-            await fsPromises.rm(getRequestedPath(filePath), { recursive: true, force: false });
-            return { success: true };
+            const entry = await moveToTrash(contentManager.contentPath, filePath, details);
+            return { success: true, entry };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('list-trash', async (event) => {
+        try {
+            assertTrustedSender(event);
+            return { success: true, items: await listTrashItems(contentManager.contentPath) };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('restore-trash-item', async (event, trashId) => {
+        try {
+            assertTrustedSender(event);
+            const entry = await restoreTrashItem(contentManager.contentPath, trashId);
+            return { success: true, entry };
         } catch (error) {
             return { success: false, error: error.message };
         }

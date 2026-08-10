@@ -57,15 +57,29 @@ export const createFile = async (filePath, content = '') => {
     }
 };
 
-export const deleteFile = async (filePath) => {
-    if (isElectron()) {
-        const result = await window.electronAPI.deleteFile(filePath);
-        if (!result.success) {
-            throw new Error(result.error);
-        }
-    } else {
-        throw new Error('Delete operation not supported in browser mode');
+export const moveToTrash = async (filePath, details = {}) => {
+    if (!isElectron() || !window.electronAPI?.trashItem) {
+        throw new Error('Trash is only supported in the desktop app');
     }
+    const result = await window.electronAPI.trashItem(filePath, details);
+    if (!result.success) throw new Error(result.error);
+    return result.entry;
+};
+
+export const listTrashItems = async () => {
+    if (!isElectron() || !window.electronAPI?.listTrash) return [];
+    const result = await window.electronAPI.listTrash();
+    if (!result.success) throw new Error(result.error);
+    return result.items || [];
+};
+
+export const restoreTrashItem = async (trashId) => {
+    if (!isElectron() || !window.electronAPI?.restoreTrashItem) {
+        throw new Error('Trash restore is only supported in the desktop app');
+    }
+    const result = await window.electronAPI.restoreTrashItem(trashId);
+    if (!result.success) throw new Error(result.error);
+    return result.entry;
 };
 
 export const createDir = async (dirPath) => {

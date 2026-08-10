@@ -26,6 +26,8 @@ dist_electron
 
 # Generated Content
 public/content.json
+public/content-pages/
+public/search-index.json
 content/content.json
 **/_draft_meta.json
 

@@ -2,6 +2,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { glob } from 'glob';
 import { parseFrontmatter } from '../electron/frontmatter.mjs';
+import { writeStaticContent } from '../electron/staticContent.mjs';
 
 export async function generateContent(customContentDir, customOutputFile, options = {}) {
     const CONTENT_DIR = customContentDir || path.join(process.cwd(), 'content');
@@ -160,12 +161,7 @@ export async function generateContent(customContentDir, customOutputFile, option
         }
     }
 
-    const output = {
-        nodes: nodes,
-        config: config
-    };
-
-    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(output, null, 2));
+    writeStaticContent(OUTPUT_FILE, nodes, config);
     console.log(`Generated content.json with ${nodes.length} items`);
 }
 

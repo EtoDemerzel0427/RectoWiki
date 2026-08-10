@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { isElectron, readFile, writeFile, createFile, deleteFile, createDir, renamePath } from './fileSystem.js';
+import { isElectron, readFile, writeFile, createFile, createDir, listTrashItems, moveToTrash, renamePath, restoreTrashItem } from './fileSystem.js';
 
 describe('fileSystem', () => {
     const originalWindow = global.window;
@@ -83,7 +83,9 @@ describe('fileSystem', () => {
         beforeEach(() => {
             global.window.electronAPI = {
                 createFile: vi.fn().mockResolvedValue({ success: true }),
-                deleteFile: vi.fn().mockResolvedValue({ success: true }),
+                trashItem: vi.fn().mockResolvedValue({ success: true, entry: { id: 'trash-id' } }),
+                listTrash: vi.fn().mockResolvedValue({ success: true, items: [{ id: 'trash-id' }] }),
+                restoreTrashItem: vi.fn().mockResolvedValue({ success: true, entry: { id: 'trash-id' } }),
                 createDir: vi.fn().mockResolvedValue({ success: true }),
                 renamePath: vi.fn().mockResolvedValue({ success: true })
             };
@@ -94,9 +96,10 @@ describe('fileSystem', () => {
             expect(global.window.electronAPI.createFile).toHaveBeenCalled();
         });
 
-        it('should call deleteFile', async () => {
-            await deleteFile('test.md');
-            expect(global.window.electronAPI.deleteFile).toHaveBeenCalled();
+        it('should move and restore trash items', async () => {
+            await expect(moveToTrash('content/test.md')).resolves.toEqual({ id: 'trash-id' });
+            await expect(listTrashItems()).resolves.toEqual([{ id: 'trash-id' }]);
+            await expect(restoreTrashItem('trash-id')).resolves.toEqual({ id: 'trash-id' });
         });
 
         it('should call createDir', async () => {

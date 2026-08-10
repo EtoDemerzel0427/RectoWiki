@@ -29,6 +29,7 @@ describe('generateContent', () => {
         fs.readFileSync.mockReturnValue('');
         fs.readJSONSync.mockReturnValue([]);
         fs.outputJSONSync.mockReturnValue();
+        fs.emptyDirSync.mockReturnValue();
         fs.writeFileSync.mockReturnValue();
     });
 
@@ -49,6 +50,12 @@ describe('generateContent', () => {
         expect(note1).toBeDefined();
         expect(note1.title).toBe('Test Title');
         expect(note1.isFolder).toBe(false);
+        expect(note1.content).toBeUndefined();
+        expect(note1.pagePath).toMatch(/^content-pages\/[a-f0-9]+\.json$/);
+        expect(fs.outputJSONSync).toHaveBeenCalledWith(
+            expect.stringContaining(note1.pagePath),
+            expect.objectContaining({ id: 'note1', content: expect.stringContaining('Test Content') })
+        );
 
         const folder = output.nodes.find(n => n.id === 'folder');
         expect(folder).toBeDefined();
@@ -102,5 +109,18 @@ describe('generateContent', () => {
         const output = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
         expect(output.nodes.some(node => node.id === 'draft')).toBe(false);
         expect(output.nodes.some(node => node.id === 'published')).toBe(true);
+    });
+
+    it('clears stale page artifacts before writing the new manifest', async () => {
+        queueScan(['published.md']);
+        fs.readFileSync.mockReturnValue('---\ntitle: Published\n---\nVisible');
+
+        await generateContent(mockContentDir, mockOutputFile);
+
+        expect(fs.emptyDirSync).toHaveBeenCalledWith('/mock/public/content-pages');
+        expect(fs.outputJSONSync).toHaveBeenCalledWith(
+            '/mock/public/search-index.json',
+            { published: 'Visible' }
+        );
     });
 });

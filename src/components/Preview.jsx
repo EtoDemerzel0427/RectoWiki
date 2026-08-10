@@ -1,10 +1,7 @@
-import React, { useState, useEffect, useRef, useDeferredValue } from 'react';
+import React, { useState, useEffect, useRef, useDeferredValue, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
-import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
-import 'katex/dist/katex.min.css';
 import {
     Home,
     Calendar,
@@ -12,8 +9,22 @@ import {
     Link as LinkIcon,
     Gauge
 } from 'lucide-react';
+import { createMarkdownSourceMap } from '../utils/sourceMapping';
 
 const SyntaxHighlightedCode = React.lazy(() => import('./SyntaxHighlightedCode'));
+const MathMarkdown = React.lazy(() => import('./MathMarkdown'));
+
+const containsMath = (content) => (
+    /(^|[^\\])\$\$?[\s\S]*?\$\$?|\\\(|\\\[|\\begin\{/.test(content)
+);
+
+const sourcePositionProps = (node) => {
+    const start = node?.position?.start?.offset;
+    const end = node?.position?.end?.offset;
+    return Number.isFinite(start)
+        ? { 'data-source-offset': start, 'data-source-end': Number.isFinite(end) ? end : start }
+        : {};
+};
 
 const AbcRenderer = ({ content }) => {
     const visualRef = useRef(null);
@@ -213,10 +224,14 @@ const staticMarkdownComponents = {
     code({ node, inline, className, children, ...props }) {
         const match = /language-(\w+)/.exec(className || '');
         if (!inline && match && match[1] === 'abc') {
-            return <AbcRenderer content={String(children).replace(/\n$/, '')} />;
+            return (
+                <div {...sourcePositionProps(node)}>
+                    <AbcRenderer content={String(children).replace(/\n$/, '')} />
+                </div>
+            );
         }
         return !inline && match ? (
-            <div className="my-6 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-[#2d2d2d] shadow-sm group">
+            <div {...sourcePositionProps(node)} className="my-6 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-[#2d2d2d] shadow-sm group">
                 <div className="flex justify-between items-center px-4 py-1.5 bg-[#1f1f1f] border-b border-gray-700">
                     <span className="text-xs font-mono text-gray-400">{match[1]}</span>
                     <div className="flex gap-1.5">
@@ -241,20 +256,24 @@ const staticMarkdownComponents = {
             </code>
         );
     },
-    h1: ({ node, ...props }) => <h1 className="text-3xl font-bold text-slate-900 dark:text-white mt-8 mb-4 pb-2 border-b border-slate-200 dark:border-slate-800" {...props} />,
-    h2: ({ node, ...props }) => <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-6 mb-3" {...props} />,
-    h3: ({ node, ...props }) => <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-5 mb-2" {...props} />,
-    blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-indigo-500 pl-4 py-2 my-4 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 italic rounded-r" {...props} />,
+    h1: ({ node, ...props }) => <h1 {...sourcePositionProps(node)} className="text-3xl font-bold text-slate-900 dark:text-white mt-8 mb-4 pb-2 border-b border-slate-200 dark:border-slate-800" {...props} />,
+    h2: ({ node, ...props }) => <h2 {...sourcePositionProps(node)} className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-6 mb-3" {...props} />,
+    h3: ({ node, ...props }) => <h3 {...sourcePositionProps(node)} className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-5 mb-2" {...props} />,
+    h4: ({ node, ...props }) => <h4 {...sourcePositionProps(node)} {...props} />,
+    h5: ({ node, ...props }) => <h5 {...sourcePositionProps(node)} {...props} />,
+    h6: ({ node, ...props }) => <h6 {...sourcePositionProps(node)} {...props} />,
+    blockquote: ({ node, ...props }) => <blockquote {...sourcePositionProps(node)} className="border-l-4 border-indigo-500 pl-4 py-2 my-4 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 italic rounded-r" {...props} />,
     ul: ({ node, ...props }) => <ul className="list-disc list-outside ml-5 space-y-1 mb-4 marker:text-indigo-500" {...props} />,
     ol: ({ node, ...props }) => <ol className="list-decimal list-outside ml-5 space-y-1 mb-4 marker:text-indigo-500" {...props} />,
-    li: ({ node, ...props }) => <li className="pl-1 text-slate-700 dark:text-slate-300" {...props} />,
+    li: ({ node, ...props }) => <li {...sourcePositionProps(node)} className="pl-1 text-slate-700 dark:text-slate-300" {...props} />,
+    table: ({ node, ...props }) => <table {...sourcePositionProps(node)} {...props} />,
     img: ({ node, ...props }) => (
         <span className="my-6 text-center block">
             <img className="rounded-lg shadow-sm max-w-full h-auto mx-auto border border-slate-200 dark:border-slate-800 inline-block" {...props} />
             {props.alt && <span className="text-xs text-slate-500 mt-2 block">{props.alt}</span>}
         </span>
     ),
-    p: ({ node, ...props }) => <p className="mb-4 leading-7 text-slate-700 dark:text-slate-300" {...props} />
+    p: ({ node, ...props }) => <p {...sourcePositionProps(node)} className="mb-4 leading-7 text-slate-700 dark:text-slate-300" {...props} />
 };
 
 const Preview = ({
@@ -264,7 +283,8 @@ const Preview = ({
     onNavigate,
     selectedTag,
     onTagClick,
-    fontSize
+    fontSize,
+    onSourceSelect
 }) => {
     // React 18+ Concurrency: useDeferredValue.
     // This allows React to prioritize the input (Editor) while updating the Preview in the background
@@ -280,6 +300,7 @@ const Preview = ({
                 const title = href.replace('wiki:', '');
                 return (
                     <span
+                        data-preview-action="navigate"
                         onClick={() => onNavigate && onNavigate(title, true)}
                         className="text-indigo-600 dark:text-indigo-400 cursor-pointer hover:underline decoration-2 font-medium inline-flex items-center gap-0.5"
                     >
@@ -291,11 +312,22 @@ const Preview = ({
         }
     }), [onNavigate]);
 
-    // Pre-process content to handle [[WikiLinks]]
-    const processContent = (content) => {
-        if (!content) return '';
-        // Replace [[Title]] with [Title](wiki:Title) - encode the title for the URL
-        return content.replace(/\[\[(.*?)\]\]/g, (match, title) => `[${title}](wiki:${encodeURIComponent(title)})`);
+    const transformedSource = useMemo(
+        () => createMarkdownSourceMap(debouncedContent || ''),
+        [debouncedContent]
+    );
+
+    const handleSourceClick = (event) => {
+        if (!onSourceSelect || event.target.closest('a, button, input, [data-preview-action]')) return;
+        const sourceElement = event.target.closest('[data-source-offset]');
+        if (!sourceElement) return;
+
+        const transformedStart = Number(sourceElement.dataset.sourceOffset);
+        const transformedEnd = Number(sourceElement.dataset.sourceEnd);
+        onSourceSelect({
+            start: transformedSource.toOriginalOffset(transformedStart),
+            end: transformedSource.toOriginalOffset(transformedEnd),
+        });
     };
 
     if (!activeNote) {
@@ -359,19 +391,31 @@ const Preview = ({
                 </div>
 
                 {/* Note Body */}
-                <div className={`prose dark:prose-invert max-w-none ${sizeClass}`}>
-                    <ReactMarkdown
-                        remarkPlugins={[remarkMath, remarkGfm]}
-                        rehypePlugins={[rehypeKatex, rehypeRaw]}
-                        components={components}
-                        urlTransform={(url) => {
-                            if (url.startsWith('wiki:')) return url;
-                            return url;
-                        }}
-                    >
-                        {/* Strip frontmatter for display */}
-                        {processContent(debouncedContent ? debouncedContent.replace(/^---\s*[\r\n]+[\s\S]*?[\r\n]+---\s*[\r\n]*/, '') : '')}
-                    </ReactMarkdown>
+                <div
+                    className={`prose dark:prose-invert max-w-none ${sizeClass} ${onSourceSelect ? 'preview-source-map' : ''}`}
+                    onClick={handleSourceClick}
+                    title={onSourceSelect ? 'Click a paragraph to locate it in the editor' : undefined}
+                >
+                    {(() => {
+                        const markdown = transformedSource.content;
+                        const sharedProps = {
+                            components,
+                            urlTransform: (url) => url,
+                            children: markdown,
+                        };
+
+                        return containsMath(markdown) ? (
+                            <React.Suspense fallback={<p className="text-sm text-slate-400">Rendering formulas…</p>}>
+                                <MathMarkdown {...sharedProps} />
+                            </React.Suspense>
+                        ) : (
+                            <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                rehypePlugins={[rehypeRaw]}
+                                {...sharedProps}
+                            />
+                        );
+                    })()}
                 </div>
             </div>
         </div>

@@ -38,17 +38,20 @@ RectoWiki uses ordinary Markdown files as its source of truth. The Electron desk
 
 - Choose any local folder as the wiki content directory
 - Side-by-side live preview and Markdown editor with a resizable divider
+- Click any preview paragraph to select and center its Markdown source in the editor
 - Frontmatter fields for title, date, tags, category, and draft status
 - Manual save or debounced automatic save using atomic file replacement
-- Create, rename, delete, reorder, and drag notes or folders in the tree
+- Create, rename, reorder, and drag notes or folders in the tree
+- Recover deleted notes and folders from the local Recently Deleted panel
 - Automatic refresh when Markdown files or configuration change on disk
 - Global and per-page font themes and content sizes
 - Works offline after installation
 
 ### Static web publishing
 
-- Converts the content tree into a static JSON index during the build
-- Lazy-loads heavy renderers so ordinary pages start faster
+- Loads a compact navigation manifest first, then fetches individual pages on demand
+- Loads the full-text search index only when search is first used
+- Lazy-loads the editor, formulas, syntax highlighting, and music renderer
 - Supports subpath deployments such as GitHub Pages project sites
 - Includes a GitHub Actions workflow that deploys `main` to GitHub Pages
 
@@ -95,7 +98,7 @@ Generate the browser-readable content index and build the static site with:
 npm run build
 ```
 
-In desktop mode, RectoWiki watches the selected content directory and reflects file changes automatically. New pages are created as local drafts under the sibling `.rectowiki/drafts/` directory. Drafts are shown in the desktop app with a `Draft` badge and can be previewed normally, but they are not copied to a static deployment. Uncheck **Draft** and save to move a draft into `content/` and make it eligible for publishing.
+In desktop mode, RectoWiki watches the selected content directory and reflects file changes automatically. New pages are created as local drafts under the sibling `.rectowiki/drafts/` directory. Drafts are shown in the desktop app with a `Draft` badge and can be previewed normally, but they are not copied to a static deployment. Uncheck **Draft** and save to move a draft into `content/` and make it eligible for publishing. Deleted items move to `.rectowiki/trash/` and can be restored from **Recently Deleted** in the sidebar.
 
 ## Desktop app
 
@@ -141,10 +144,13 @@ For Netlify or Vercel, use `npm run build` as the build command and `dist` as th
 RectoWiki/
 ├── content/                 # Markdown notes and wiki configuration
 ├── .rectowiki/drafts/       # Local-only drafts (ignored by Git)
+├── .rectowiki/trash/        # Recoverable local deletions (ignored by Git)
 ├── docs/images/             # README screenshots
 ├── electron/                # Desktop main process and content watcher
 ├── public/
-│   ├── content.json         # Generated web content index
+│   ├── content.json         # Generated lightweight navigation manifest
+│   ├── content-pages/       # Generated per-page payloads
+│   ├── search-index.json    # Generated, lazily loaded full-text index
 │   ├── logo.png             # Web, favicon, and packaged app icon
 │   └── screenshot.png       # Desktop overview used in this README
 ├── scripts/                 # Static content generation

@@ -10,7 +10,12 @@ export default defineConfig(() => ({
     host: '127.0.0.1',
     port: 5173,
     watch: {
-      ignored: ['**/content/**', '**/public/content.json']
+      ignored: [
+        '**/content/**',
+        '**/public/content.json',
+        '**/public/content-pages/**',
+        '**/public/search-index.json'
+      ]
     }
   }
 }))

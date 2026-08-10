@@ -104,10 +104,91 @@ async function publishDraftFile(contentRoot, draftPath, content) {
     return `content/${relativePath}`;
 }
 
+function getTrashItemDirectory(contentRoot, trashId) {
+    if (typeof trashId !== 'string' || !/^[0-9a-f-]{36}$/.test(trashId)) {
+        throw new Error('Invalid trash item');
+    }
+    return path.join(path.dirname(path.resolve(contentRoot)), '.rectowiki', 'trash', 'items', trashId);
+}
+
+async function moveToTrash(contentRoot, requestPath, details = {}) {
+    const sourcePath = resolveContentPath(contentRoot, requestPath);
+    const trashId = randomUUID();
+    const itemDirectory = getTrashItemDirectory(contentRoot, trashId);
+    const payloadPath = path.join(itemDirectory, 'payload');
+    const entryPath = path.join(itemDirectory, 'entry.json');
+    const stats = await fs.stat(sourcePath);
+    const entry = {
+        id: trashId,
+        originalPath: requestPath,
+        title: String(details.title || path.basename(requestPath).replace(/\.md$/, '')),
+        fileName: String(details.fileName || path.basename(requestPath)),
+        parentId: typeof details.parentId === 'string' ? details.parentId : null,
+        sourceRoot: requestPath.startsWith(DRAFTS_PREFIX) ? 'drafts' : 'content',
+        draft: requestPath.startsWith(DRAFTS_PREFIX) || details.draft === true,
+        isFolder: stats.isDirectory(),
+        deletedAt: new Date().toISOString(),
+    };
+
+    await fs.mkdir(itemDirectory, { recursive: true });
+    try {
+        await fs.rename(sourcePath, payloadPath);
+        await atomicWriteFile(entryPath, JSON.stringify(entry, null, 2));
+        return entry;
+    } catch (error) {
+        await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+        await fs.rename(payloadPath, sourcePath).catch(() => {});
+        await fs.rm(itemDirectory, { recursive: true, force: true }).catch(() => {});
+        throw error;
+    }
+}
+
+async function listTrashItems(contentRoot) {
+    const itemsDirectory = path.join(path.dirname(path.resolve(contentRoot)), '.rectowiki', 'trash', 'items');
+    let directories = [];
+    try {
+        directories = await fs.readdir(itemsDirectory, { withFileTypes: true });
+    } catch (error) {
+        if (error.code === 'ENOENT') return [];
+        throw error;
+    }
+
+    const entries = await Promise.all(directories
+        .filter((item) => item.isDirectory())
+        .map(async (item) => {
+            try {
+                const entry = JSON.parse(await fs.readFile(path.join(itemsDirectory, item.name, 'entry.json'), 'utf8'));
+                resolveContentPath(contentRoot, entry.originalPath);
+                return entry;
+            } catch {
+                return null;
+            }
+        }));
+
+    return entries
+        .filter(Boolean)
+        .sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+}
+
+async function restoreTrashItem(contentRoot, trashId) {
+    const itemDirectory = getTrashItemDirectory(contentRoot, trashId);
+    const entry = JSON.parse(await fs.readFile(path.join(itemDirectory, 'entry.json'), 'utf8'));
+    const targetPath = resolveContentPath(contentRoot, entry.originalPath);
+    const payloadPath = path.join(itemDirectory, 'payload');
+
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await renameExclusive(payloadPath, targetPath);
+    await fs.rm(itemDirectory, { recursive: true, force: true });
+    return entry;
+}
+
 module.exports = {
     atomicWriteFile,
     createFileExclusive,
     renameExclusive,
     publishDraftFile,
+    moveToTrash,
+    listTrashItems,
+    restoreTrashItem,
     resolveContentPath,
 };

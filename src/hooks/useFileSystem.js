@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { isElectron, readFile, writeFile, createFile, deleteFile, createDir, renamePath, sanitizeFilename } from '../utils/fileSystem';
+import { isElectron, readFile, writeFile, createFile, createDir, moveToTrash, renamePath, restoreTrashItem, sanitizeFilename } from '../utils/fileSystem';
 import { parseFrontmatter, stringifyFrontmatter } from '../utils/frontmatter';
 
 export const sharesOrderingMetadata = (candidate, item) => {
@@ -20,6 +20,8 @@ export const useFileSystem = () => {
     const [notes, setNotes] = useState([]);
     const [wikiConfig, setWikiConfig] = useState({ title: "RectoWiki" });
     const [loading, setLoading] = useState(true);
+    const [searchIndex, setSearchIndex] = useState({});
+    const [searchIndexLoaded, setSearchIndexLoaded] = useState(false);
 
     const getSourceRoot = (itemOrRoot = 'content') => {
         if (typeof itemOrRoot === 'string') return itemOrRoot;
@@ -78,6 +80,21 @@ export const useFileSystem = () => {
             if (!isBackground) setLoading(false);
         }
     }, []);
+
+    const loadSearchIndex = useCallback(async () => {
+        if (isElectron() || searchIndexLoaded) return;
+
+        try {
+            const response = await fetch(`${import.meta.env.BASE_URL}search-index.json`, {
+                cache: 'no-cache'
+            });
+            if (!response.ok) throw new Error('Failed to load search index');
+            setSearchIndex(await response.json());
+            setSearchIndexLoaded(true);
+        } catch (error) {
+            console.error('Failed to load search index:', error);
+        }
+    }, [searchIndexLoaded]);
 
     useEffect(() => {
         loadNotes();
@@ -199,35 +216,42 @@ export const useFileSystem = () => {
         // Confirmation handled in UI
 
         try {
-            // Construct path
-            // item.id is like 'Physics/Schrodinger'
-            // We need to know if it's a file or folder to append extension?
-            // item.fileName should have it.
-
-            // If item has parentId, path is content/parentId/fileName
-            // If root, content/fileName
-
             const filePath = getNodePath(item);
+            const trashEntry = await moveToTrash(filePath, {
+                title: item.title,
+                fileName: item.fileName,
+                parentId: item.parentId,
+                draft: item.draft,
+            });
 
-            // If it's a folder, we might need recursive delete?
-            // fs.unlink only works for files. fs.rm for dirs.
-            // Our deleteFile implementation uses fs.unlink.
-            // We need deleteDir? Or check if folder.
-            // For now let's assume files only or empty folders.
-            // Actually, let's just try deleteFile. If it's a dir, it might fail if not empty.
-
-            await deleteFile(filePath);
-
-            setNotes(prev => prev.filter(n => n.id !== item.id));
+            setNotes(prev => prev.filter(n => n.id !== item.id && !n.id.startsWith(`${item.id}/`)));
 
             // Update _meta.json or _draft_meta.json
             await removeFromMeta(item.parentId, item.fileName.replace('.md', ''), item.draft, getSourceRoot(item));
 
             // Trigger content regeneration
             await window.electronAPI.runGenerator();
+            return trashEntry;
 
         } catch (error) {
-            alert("Failed to delete: " + error.message);
+            alert("Failed to move to Trash: " + error.message);
+            return null;
+        }
+    };
+
+    const handleRestore = async (trashId) => {
+        if (!isElectron()) return null;
+
+        try {
+            const entry = await restoreTrashItem(trashId);
+            const name = entry.fileName.replace(/\.md$/, '');
+            await addToMeta(entry.parentId, name, entry.id, 'inside', entry.draft, entry.sourceRoot);
+            await window.electronAPI.runGenerator();
+            await loadNotes(true);
+            return entry;
+        } catch (error) {
+            alert("Failed to restore item: " + error.message);
+            return null;
         }
     };
 
@@ -627,6 +651,9 @@ export const useFileSystem = () => {
         wikiConfig,
         saveConfig,
         addToMeta,
-        removeFromMeta
+        removeFromMeta,
+        handleRestore,
+        searchIndex,
+        loadSearchIndex
     };
 };

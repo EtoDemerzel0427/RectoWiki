@@ -134,6 +134,22 @@ kbd {
   line-height: 1.7;
 }
 
+.preview-source-map [data-source-offset] {
+  cursor: text;
+  border-radius: 0.25rem;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.preview-source-map [data-source-offset]:hover {
+  background-color: rgb(238 242 255 / 0.8);
+  box-shadow: 0 0 0 4px rgb(238 242 255 / 0.8);
+}
+
+.dark .preview-source-map [data-source-offset]:hover {
+  background-color: rgb(49 46 129 / 0.22);
+  box-shadow: 0 0 0 4px rgb(49 46 129 / 0.22);
+}
+
 /* Premium Table Styles */
 .prose table {
   width: 100%;

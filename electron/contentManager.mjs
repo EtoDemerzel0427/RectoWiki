@@ -5,6 +5,7 @@ import chokidar from 'chokidar';
 import { glob } from 'glob';
 import { app } from 'electron';
 import { parseFrontmatter } from './frontmatter.mjs';
+import { writeStaticContent } from './staticContent.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -228,18 +229,14 @@ class ContentManager {
     }
 
     async syncToPublic() {
-        // Write content.json to public/ for Dev Server
+        // Write a lightweight manifest plus per-page payloads for the web.
         const publicPath = path.join(process.cwd(), 'public', 'content.json');
-        const output = {
-            config: this.config,
-            // The dev server is still a web surface. Never expose local drafts
-            // through its generated JSON, even when Electron is watching a
-            // content folder that contains private drafts.
-            nodes: this.index.filter(node => !node.draft)
-        };
         try {
-            await fs.writeJson(publicPath, output, { spaces: 2 });
-            console.log('[ContentManager] Synced to public/content.json');
+            // The dev server is still a web surface. Never expose local drafts
+            // through any generated artifact, even when Electron watches them.
+            const publishedNodes = this.index.filter(node => !node.draft);
+            writeStaticContent(publicPath, publishedNodes, this.config);
+            console.log('[ContentManager] Synced static web artifacts');
         } catch (e) {
             console.error('[ContentManager] Failed to sync public:', e);
         }
