@@ -4,43 +4,121 @@ on:
   push:
     tags:
       - 'v*'
+  release:
+    types: [published]
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  build:
+    name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-
     strategy:
+      fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - name: linux
+            os: ubuntu-latest
+          - name: macos
+            os: macos-latest
+          - name: windows
+            os: windows-latest
 
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
 
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+          cache: npm
 
-      - name: Install Dependencies
-        run: npm install
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Set Version from Tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Set version from tag
+        env:
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
         shell: bash
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION="${TAG#v}"
           echo "Setting version to $VERSION"
-          npm version $VERSION --no-git-tag-version
+          npm version "$VERSION" --no-git-tag-version
 
-      - name: Build and Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ELECTRON_BUILD: 'true'
+      - name: Build application
         run: |
           npm run gen-content
           npm run build
-          npx electron-builder --publish always
+          npx electron-builder --publish never
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            dist_electron/*.dmg
+            dist_electron/*.AppImage
+            dist_electron/*.exe
+            dist_electron/*.blockmap
+            dist_electron/latest*.yml
+
+  publish:
+    name: Publish release assets
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          if ! gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$REPOSITORY" \
+              --verify-tag \
+              --generate-notes \
+              --draft
+          fi
+
+          mapfile -d '' -t ASSETS < <(
+            find release-assets -type f \( \
+              -name '*.dmg' -o \
+              -name '*.AppImage' -o \
+              -name '*.exe' -o \
+              -name '*.blockmap' -o \
+              -name 'latest*.yml' \
+            \) -print0
+          )
+
+          if [ "${#ASSETS[@]}" -eq 0 ]; then
+            echo "No release assets were produced"
+            exit 1
+          fi
+
+          gh release upload "$TAG" \
+            --repo "$REPOSITORY" \
+            --clobber \
+            "${ASSETS[@]}"
+
+          gh release edit "$TAG" \
+            --repo "$REPOSITORY" \
+            --draft=false
