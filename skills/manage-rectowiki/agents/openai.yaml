@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage RectoWiki"
+  short_description: "Create, revise, validate, and publish RectoWiki notes"
+  default_prompt: "Use $manage-rectowiki to create or safely revise a RectoWiki note as a local draft."
