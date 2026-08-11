@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Save, Search, ChevronUp, ChevronDown, X } from 'lucide-react';
 import { parseFrontmatter, stringifyFrontmatter } from '../utils/frontmatter';
 import {
@@ -20,6 +20,13 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize, selectionReques
     // Search State
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [showLineNumbers, setShowLineNumbers] = useState(() => {
+        try {
+            return window.localStorage.getItem('rectowiki-editor-line-numbers') === 'true';
+        } catch {
+            return false;
+        }
+    });
 
     const sizeClass = {
         'sm': 'text-sm',
@@ -32,6 +39,7 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize, selectionReques
     const isComposing = useRef(false);
     const lastEmittedContent = useRef(content);
     const textareaRef = useRef(null);
+    const lineNumbersRef = useRef(null);
     const searchInputRef = useRef(null);
     const bodyRef = useRef(body);
     const lastFilePathRef = useRef(filePath);
@@ -44,6 +52,19 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize, selectionReques
     useEffect(() => {
         bodyRef.current = body;
     }, [body]);
+
+    useEffect(() => {
+        try {
+            window.localStorage.setItem('rectowiki-editor-line-numbers', String(showLineNumbers));
+        } catch {
+            // The preference is optional when persistent browser storage is unavailable.
+        }
+    }, [showLineNumbers]);
+
+    const lineNumbers = useMemo(
+        () => Array.from({ length: body.split('\n').length }, (_, index) => index + 1),
+        [body]
+    );
 
     // Initial load and external updates
     useEffect(() => {
@@ -364,6 +385,12 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize, selectionReques
         }
     };
 
+    const handleTextareaScroll = (e) => {
+        if (lineNumbersRef.current) {
+            lineNumbersRef.current.scrollTop = e.currentTarget.scrollTop;
+        }
+    };
+
     const handleSearchKeyDown = (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
@@ -522,19 +549,47 @@ const Editor = ({ content, filePath, onSave, onChange, fontSize, selectionReques
                 </div>
             </div>
 
-            <div className="flex-1 overflow-hidden relative">
-                <textarea
-                    ref={textareaRef}
-                    name="note-body"
-                    className={`w-full h-full p-8 resize-none focus:outline-none bg-transparent text-slate-800 dark:text-slate-200 font-mono leading-relaxed ${sizeClass}`}
-                    value={body}
-                    onChange={(e) => updateBody(e.target.value)}
-                    onKeyDown={handleTextareaKeyDown}
-                    onCompositionStart={handleCompositionStart}
-                    onCompositionEnd={handleCompositionEnd}
-                    placeholder="Start writing..."
-                    spellCheck="false"
-                />
+            <div className="flex-1 overflow-hidden relative flex flex-col">
+                <div className="h-10 shrink-0 flex items-center justify-end px-8 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60">
+                    <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 cursor-pointer select-none">
+                        <input
+                            type="checkbox"
+                            checked={showLineNumbers}
+                            onChange={(e) => setShowLineNumbers(e.target.checked)}
+                            className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                        Show line numbers
+                    </label>
+                </div>
+
+                <div className="flex-1 min-h-0 flex overflow-hidden relative">
+                    {showLineNumbers && (
+                        <div
+                            ref={lineNumbersRef}
+                            aria-hidden="true"
+                            className={`w-14 shrink-0 overflow-hidden border-r border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 py-8 pr-3 text-right font-mono leading-relaxed text-slate-400 dark:text-slate-600 select-none ${sizeClass}`}
+                        >
+                            {lineNumbers.map((lineNumber) => (
+                                <div key={lineNumber}>{lineNumber}</div>
+                            ))}
+                        </div>
+                    )}
+
+                    <textarea
+                        ref={textareaRef}
+                        name="note-body"
+                        className={`flex-1 min-w-0 h-full py-8 pr-8 ${showLineNumbers ? 'pl-4' : 'pl-8'} resize-none focus:outline-none bg-transparent text-slate-800 dark:text-slate-200 font-mono leading-relaxed ${sizeClass}`}
+                        value={body}
+                        onChange={(e) => updateBody(e.target.value)}
+                        onKeyDown={handleTextareaKeyDown}
+                        onScroll={handleTextareaScroll}
+                        onCompositionStart={handleCompositionStart}
+                        onCompositionEnd={handleCompositionEnd}
+                        placeholder="Start writing..."
+                        spellCheck="false"
+                        wrap={showLineNumbers ? 'off' : 'soft'}
+                    />
+                </div>
 
                 <button
                     onClick={handleSave}
